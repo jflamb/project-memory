@@ -368,3 +368,85 @@ def test_plan_list_filter_by_type(initialized_repo, runner):
     data = json.loads(result.output)
     assert len(data) == 1
     assert data[0]["path"] == "plan:p2"
+
+
+# --- export / import ---
+
+
+def test_export_writes_memory_md(initialized_repo, runner):
+    runner.invoke(app, ["remember", "auth", "OAuth2 pattern", "--type", "convention", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["export", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Exported" in result.output
+    md_path = initialized_repo / "MEMORY.md"
+    assert md_path.exists()
+    content = md_path.read_text()
+    assert "### auth" in content
+    assert "OAuth2 pattern" in content
+
+
+def test_export_to_custom_output(initialized_repo, runner, tmp_path):
+    runner.invoke(app, ["remember", "key1", "content", "--path", str(initialized_repo)])
+    out_path = tmp_path / "custom.md"
+    result = runner.invoke(app, ["export", "--output", str(out_path), "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert out_path.exists()
+
+
+def test_import_from_memory_md(initialized_repo, runner):
+    # Export first to create MEMORY.md
+    runner.invoke(app, ["remember", "auth", "OAuth2 pattern", "--type", "convention", "--path", str(initialized_repo)])
+    runner.invoke(app, ["export", "--path", str(initialized_repo)])
+
+    # Create a fresh repo and import
+    fresh = initialized_repo / "fresh"
+    fresh.mkdir()
+    runner.invoke(app, ["init", "--path", str(fresh)])
+
+    # Copy MEMORY.md to the fresh repo
+    import shutil
+    shutil.copy(initialized_repo / "MEMORY.md", fresh / "MEMORY.md")
+
+    result = runner.invoke(app, ["import", "--path", str(fresh)])
+    assert result.exit_code == 0
+    assert "Imported 1" in result.output
+
+    # Verify the note was imported
+    result = runner.invoke(app, ["recall", "", "--path", str(fresh), "--format", "json"])
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["type"] == "convention"
+
+
+def test_import_idempotent(initialized_repo, runner):
+    runner.invoke(app, ["remember", "key1", "content", "--type", "convention", "--path", str(initialized_repo)])
+    runner.invoke(app, ["export", "--path", str(initialized_repo)])
+
+    result1 = runner.invoke(app, ["import", "--path", str(initialized_repo)])
+    assert "skipped 1" in result1.output.lower() or "Imported 0" in result1.output
+
+
+def test_import_missing_file(initialized_repo, runner):
+    result = runner.invoke(app, ["import", "--path", str(initialized_repo)])
+    assert result.exit_code == 1
+
+
+def test_auto_import_on_init(tmp_path, runner):
+    """init should auto-import MEMORY.md if it exists and DB is fresh."""
+    md = """# Project Memory
+
+## Notes
+
+### imported-note
+**Type:** convention | **Updated:** 2026-03-21T10:00:00.000Z
+
+Auto-imported content.
+"""
+    (tmp_path / "MEMORY.md").write_text(md)
+    result = runner.invoke(app, ["init", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+
+    result = runner.invoke(app, ["recall", "", "--path", str(tmp_path), "--format", "json"])
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["type"] == "convention"

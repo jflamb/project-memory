@@ -8,6 +8,7 @@ import typer
 
 from .db import ProjectMemoryDB
 from .index import index_repo
+from .portability import export_memory, import_memory
 from .search import search as search_docs
 from .server import create_app, create_stdio_server
 
@@ -60,6 +61,12 @@ def init(path: RepoPath = "."):
         root = Path(path).resolve()
         with ProjectMemoryDB(root=root) as db:
             typer.echo(f"Initialized project memory database at {db.db_path}")
+            # Auto-import MEMORY.md if present and DB is empty
+            memory_md = root / "MEMORY.md"
+            if memory_md.exists() and db.document_count() == 0:
+                result = import_memory(db, memory_md)
+                if result["imported"] > 0:
+                    typer.echo(f"Auto-imported {result['imported']} entries from MEMORY.md")
     except PermissionError:
         typer.echo("Error: No write permission for this directory", err=True)
         raise typer.Exit(code=1)
@@ -126,6 +133,49 @@ def stats(path: RepoPath = "."):
         size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
     typer.echo(f"Documents: {count}")
     typer.echo(f"Database size: {size_str}")
+
+
+# --- Export / Import ---
+
+
+@app.command("export")
+def export_command(
+    output: str = typer.Option("", "--output", "-o", help="Output file path (default: MEMORY.md in repo root)"),
+    path: RepoPath = ".",
+):
+    """Export project memory to a MEMORY.md file."""
+    root = Path(path).resolve()
+    if not (root / ".project-memory").exists():
+        typer.echo("Error: No project memory database found. Run 'project-memory init' first.", err=True)
+        raise typer.Exit(code=1)
+
+    with ProjectMemoryDB(root=root) as db:
+        md = export_memory(db)
+
+    out_path = Path(output) if output else root / "MEMORY.md"
+    out_path.write_text(md, encoding="utf-8")
+    typer.echo(f"Exported to {out_path}")
+
+
+@app.command("import")
+def import_command(
+    input_file: str = typer.Option("", "--input", "-i", help="Input file path (default: MEMORY.md in repo root)"),
+    path: RepoPath = ".",
+):
+    """Import project memory from a MEMORY.md file."""
+    root = Path(path).resolve()
+    if not (root / ".project-memory").exists():
+        typer.echo("Error: No project memory database found. Run 'project-memory init' first.", err=True)
+        raise typer.Exit(code=1)
+
+    in_path = Path(input_file) if input_file else root / "MEMORY.md"
+    if not in_path.exists():
+        typer.echo(f"Error: {in_path} not found", err=True)
+        raise typer.Exit(code=1)
+
+    with ProjectMemoryDB(root=root) as db:
+        result = import_memory(db, in_path)
+    typer.echo(f"Imported {result['imported']} entries ({result['skipped']} skipped)")
 
 
 # --- Notes ---

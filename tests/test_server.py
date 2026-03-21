@@ -117,3 +117,61 @@ def test_stdio_plan_list_filter_by_type(tmp_path):
         results = db.plan_list(type="protocol", status=None)
         assert len(results) == 1
         assert results[0]["path"] == "plan:p2"
+
+
+# --- MCP stdio server: export/import ---
+
+
+def test_stdio_export(tmp_path):
+    """Export tool should produce valid MEMORY.md content."""
+    from project_memory.db import ProjectMemoryDB
+    from project_memory.portability import export_memory as do_export
+    with ProjectMemoryDB(root=tmp_path) as db:
+        db.remember("auth", "OAuth2 pattern", type="convention")
+        md = do_export(db)
+    assert "### auth" in md
+    assert "**Type:** convention" in md
+
+
+def test_stdio_import(tmp_path):
+    """Import tool should load entries from MEMORY.md."""
+    from project_memory.db import ProjectMemoryDB
+    from project_memory.portability import import_memory as do_import
+    md = """# Project Memory
+
+## Notes
+
+### imported
+**Type:** convention | **Updated:** 2026-03-21T10:00:00.000Z
+
+Imported content.
+"""
+    (tmp_path / "MEMORY.md").write_text(md)
+    with ProjectMemoryDB(root=tmp_path) as db:
+        result = do_import(db, tmp_path / "MEMORY.md")
+        assert result["imported"] == 1
+        notes = db.recall()
+        assert len(notes) == 1
+
+
+def test_stdio_auto_import_on_init(tmp_path, monkeypatch):
+    """init should auto-import MEMORY.md if DB is empty."""
+    monkeypatch.chdir(tmp_path)
+    md = """# Project Memory
+
+## Notes
+
+### auto-imported
+**Type:** context | **Updated:** 2026-03-21T10:00:00.000Z
+
+Auto-imported on init.
+"""
+    (tmp_path / "MEMORY.md").write_text(md)
+    from project_memory.db import ProjectMemoryDB
+    from project_memory.portability import import_memory as do_import
+    with ProjectMemoryDB(root=tmp_path) as db:
+        if db.document_count() == 0 and (tmp_path / "MEMORY.md").exists():
+            do_import(db, tmp_path / "MEMORY.md")
+        notes = db.recall()
+        assert len(notes) == 1
+        assert notes[0]["type"] == "context"

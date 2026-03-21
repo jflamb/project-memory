@@ -9,6 +9,7 @@ from starlette.routing import Mount, Route
 
 from .db import ProjectMemoryDB
 from .index import index_repo as index_repository
+from .portability import export_memory as do_export, import_memory as do_import
 from .search import search as search_repository
 
 
@@ -219,6 +220,28 @@ def create_stdio_server() -> FastMCP:
         with _ensure_db() as db:
             archived = db.plan_archive(key)
         return {"key": key, "archived": archived}
+
+    # --- Export / Import ---
+
+    @mcp.tool()
+    def export_memory() -> dict:
+        """Export all active memory entries to MEMORY.md in the repo root. Returns the file path."""
+        root = _cwd_root()
+        with _ensure_db() as db:
+            md = do_export(db)
+        out_path = root / "MEMORY.md"
+        out_path.write_text(md, encoding="utf-8")
+        return {"path": str(out_path), "exported": True}
+
+    @mcp.tool()
+    def import_memory() -> dict:
+        """Import entries from MEMORY.md in the repo root. Idempotent — unchanged entries are skipped."""
+        root = _cwd_root()
+        md_path = root / "MEMORY.md"
+        if not md_path.exists():
+            return {"error": "MEMORY.md not found", "imported": 0, "skipped": 0}
+        with _ensure_db() as db:
+            return do_import(db, md_path)
 
     return mcp
 
