@@ -10,18 +10,22 @@ This project provides `openbrain`, a repo-scoped memory engine backed by SQLite 
 |------|---------|
 | `index` | Re-index text files in the repo after changes |
 | `search` | Full-text search with bm25 ranking — use before starting work to find relevant context |
-| `list_documents` | See what's currently indexed |
+| `remember` | Store a note in project memory (`key` + `content`) |
+| `recall` | Retrieve notes — search by content, or list all if no query |
+| `forget` | Remove a note by key |
+| `list_documents` | See what's currently indexed (files + notes) |
 | `stats` | Document count and database size |
 
 ### When to use them
 
-- **Starting a task**: `search` for relevant files before reading code
+- **Starting a task**: `recall` to check for existing project notes, `search` for relevant files
+- **Learning something worth keeping**: `remember` with a descriptive key (e.g. `auth-pattern`, `deploy-steps`)
 - **After writing/deleting files**: `index` to keep the database current
 - **Exploring the codebase**: `search` is faster than grepping for conceptual queries
 
 ### What not to do
 
-- Do not create markdown files for memory or notes — use the database
+- Do not create markdown files for memory or notes — use `remember` instead
 - Do not manually manage `.openbrain/` — it auto-initializes on first tool use
 
 ## Project structure

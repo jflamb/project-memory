@@ -100,6 +100,66 @@ def stats(path: RepoPath = "."):
     typer.echo(f"Database size: {size_str}")
 
 
+@app.command()
+def remember(
+    key: str = typer.Argument(..., help="Short identifier for this note"),
+    content: str = typer.Argument(..., help="Text to remember"),
+    path: RepoPath = ".",
+):
+    """Store a note in project memory."""
+    root = Path(path).resolve()
+    with OpenBrainDB(root=root) as db:
+        written = db.remember(key, content)
+    if written:
+        typer.echo(f"Remembered '{key}'")
+    else:
+        typer.echo(f"'{key}' unchanged", err=True)
+
+
+@app.command()
+def forget(
+    key: str = typer.Argument(..., help="Key of the note to remove"),
+    path: RepoPath = ".",
+):
+    """Remove a note from project memory."""
+    root = Path(path).resolve()
+    with OpenBrainDB(root=root) as db:
+        deleted = db.forget(key)
+    if deleted:
+        typer.echo(f"Forgot '{key}'")
+    else:
+        typer.echo(f"No note found with key '{key}'", err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def recall(
+    query: str = typer.Argument("", help="Search query (empty lists all notes)"),
+    path: RepoPath = ".",
+    output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+):
+    """Retrieve notes from project memory."""
+    root = Path(path).resolve()
+    with OpenBrainDB(root=root) as db:
+        results = db.recall(query=query or None, limit=limit)
+    if not results:
+        typer.echo("No notes found", err=True)
+        raise typer.Exit(code=0)
+
+    if output_format == OutputFormat.json:
+        typer.echo(json.dumps(results, indent=2))
+    elif output_format == OutputFormat.plain:
+        for note in results:
+            key = note["path"].removeprefix("note:")
+            typer.echo(f"{key}: {note['content'][:100]}")
+    else:
+        for note in results:
+            key = note["path"].removeprefix("note:")
+            typer.echo(f"[{key}]")
+            typer.echo(f"  {note['content'][:300]}\n")
+
+
 @app.command("serve-stdio")
 def serve_stdio_command():
     """Run the MCP server over stdio for AI agent integration."""

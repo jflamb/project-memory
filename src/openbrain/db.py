@@ -216,6 +216,41 @@ class OpenBrainDB:
     def document_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
 
+    def remember(self, key: str, content: str) -> bool:
+        """Store a note in memory. Key is a short identifier (used as path with note: prefix).
+        Returns True if written, False if unchanged."""
+        path = f"note:{key}"
+        return self.upsert_document(path, content, source_type="note")
+
+    def forget(self, key: str) -> bool:
+        """Remove a note by key. Returns True if deleted, False if not found."""
+        path = f"note:{key}"
+        cur = self.conn.execute("DELETE FROM documents WHERE path = ? AND source_type = 'note'", (path,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def recall(self, query: str = None, limit: int = 20) -> List[dict]:
+        """Retrieve notes. If query is given, search notes by content. Otherwise list all notes."""
+        if query:
+            normalized = normalize_fts_query(query)
+            if not normalized:
+                return []
+            cur = self.conn.execute(
+                """SELECT d.id, d.path, d.content, d.indexed_at, bm25(documents_fts) AS rank
+                   FROM documents d
+                   JOIN documents_fts f ON d.id = f.rowid
+                   WHERE documents_fts MATCH ? AND d.source_type = 'note'
+                   ORDER BY rank
+                   LIMIT ?""",
+                (normalized, limit),
+            )
+        else:
+            cur = self.conn.execute(
+                "SELECT id, path, content, indexed_at FROM documents WHERE source_type = 'note' ORDER BY path LIMIT ?",
+                (limit,),
+            )
+        return [dict(row) for row in cur.fetchall()]
+
     def close(self):
         self.conn.close()
 

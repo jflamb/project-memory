@@ -176,6 +176,73 @@ def test_migrate_from_v0_schema(tmp_path):
         assert len(results) == 1
 
 
+# --- remember / forget / recall ---
+
+
+def test_remember_stores_note(db):
+    assert db.remember("deploy-steps", "run migrations then restart") is True
+    notes = db.recall()
+    assert len(notes) == 1
+    assert notes[0]["path"] == "note:deploy-steps"
+    assert "migrations" in notes[0]["content"]
+
+
+def test_remember_skips_unchanged(db):
+    db.remember("key1", "some content")
+    assert db.remember("key1", "some content") is False
+
+
+def test_remember_updates_changed(db):
+    db.remember("key1", "version 1")
+    assert db.remember("key1", "version 2") is True
+    notes = db.recall()
+    assert notes[0]["content"] == "version 2"
+
+
+def test_forget_removes_note(db):
+    db.remember("temp", "temporary note")
+    assert db.forget("temp") is True
+    assert db.recall() == []
+
+
+def test_forget_returns_false_if_missing(db):
+    assert db.forget("nonexistent") is False
+
+
+def test_forget_does_not_delete_files(db):
+    db.upsert_document("real-file.txt", "file content")
+    db.remember("real-file.txt", "note content")
+    db.forget("real-file.txt")
+    # The file document should still exist
+    docs = db.list_documents()
+    assert any(d["path"] == "real-file.txt" for d in docs)
+
+
+def test_recall_searches_notes(db):
+    db.remember("auth", "use OAuth2 for authentication")
+    db.remember("deploy", "deploy to k8s cluster")
+    results = db.recall("OAuth2")
+    assert len(results) == 1
+    assert results[0]["path"] == "note:auth"
+
+
+def test_recall_excludes_files(db):
+    db.upsert_document("readme.txt", "OAuth2 docs here")
+    db.remember("auth", "use OAuth2 for authentication")
+    results = db.recall("OAuth2")
+    # Only the note, not the file
+    assert len(results) == 1
+    assert results[0]["path"] == "note:auth"
+
+
+def test_search_includes_notes(db):
+    """Regular search should find both files and notes."""
+    db.upsert_document("readme.txt", "project overview")
+    db.remember("overview", "this project does X")
+    results = db.search("overview")
+    assert len(results) == 2
+
+
 # --- normalize_fts_query ---
 
 

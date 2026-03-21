@@ -100,6 +100,26 @@ def create_stdio_server() -> FastMCP:
             size_bytes = 0
         return {"documents": count, "size_bytes": size_bytes}
 
+    @mcp.tool()
+    def remember(key: str, content: str) -> dict:
+        """Store a note in project memory. Key is a short identifier (e.g. 'auth-pattern', 'deploy-steps'). Content is the text to remember."""
+        with _ensure_db() as db:
+            written = db.remember(key, content)
+        return {"key": key, "written": written}
+
+    @mcp.tool()
+    def forget(key: str) -> dict:
+        """Remove a note from project memory by key."""
+        with _ensure_db() as db:
+            deleted = db.forget(key)
+        return {"key": key, "deleted": deleted}
+
+    @mcp.tool()
+    def recall(query: str = "", limit: int = 20) -> list[dict]:
+        """Retrieve notes from project memory. If query is given, search notes by content. If empty, list all notes."""
+        with _ensure_db() as db:
+            return db.recall(query=query or None, limit=limit)
+
     return mcp
 
 

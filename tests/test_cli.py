@@ -167,3 +167,40 @@ def test_stats_shows_count(initialized_repo, runner):
 def test_stats_requires_init(tmp_path, runner):
     result = runner.invoke(app, ["stats", "--path", str(tmp_path)])
     assert result.exit_code == 1
+
+
+# --- remember / forget / recall ---
+
+
+def test_remember_and_recall(initialized_repo, runner):
+    result = runner.invoke(app, ["remember", "deploy", "run migrations first", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Remembered 'deploy'" in result.output
+
+    result = runner.invoke(app, ["recall", "", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "deploy" in result.output
+    assert "migrations" in result.output
+
+
+def test_recall_json_format(initialized_repo, runner):
+    runner.invoke(app, ["remember", "tip", "use pytest -v", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["recall", "", "--path", str(initialized_repo), "--format", "json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data[0]["path"] == "note:tip"
+
+
+def test_forget_removes_note(initialized_repo, runner):
+    runner.invoke(app, ["remember", "temp", "temporary", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["forget", "temp", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Forgot 'temp'" in result.output
+
+    result = runner.invoke(app, ["recall", "", "--path", str(initialized_repo)])
+    assert "No notes found" in result.output
+
+
+def test_forget_missing_key(initialized_repo, runner):
+    result = runner.invoke(app, ["forget", "nonexistent", "--path", str(initialized_repo)])
+    assert result.exit_code == 1
