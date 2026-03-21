@@ -13,7 +13,7 @@ def runner():
 
 @pytest.fixture
 def initialized_repo(tmp_path, runner):
-    """A tmp_path with an initialized ProjectMemory database."""
+    """A tmp_path with an initialized project memory database."""
     result = runner.invoke(app, ["init", "--path", str(tmp_path)])
     assert result.exit_code == 0
     return tmp_path
@@ -296,3 +296,75 @@ def test_plan_get_json(initialized_repo, runner):
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["status"] == "active"
+
+
+# --- type support ---
+
+
+def test_remember_with_type(initialized_repo, runner):
+    result = runner.invoke(app, ["remember", "auth", "OAuth2 pattern", "--type", "convention", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    result = runner.invoke(app, ["recall", "", "--path", str(initialized_repo), "--format", "json"])
+    data = json.loads(result.output)
+    assert data[0]["type"] == "convention"
+
+
+def test_recall_filter_by_type(initialized_repo, runner):
+    runner.invoke(app, ["remember", "auth", "OAuth2", "--type", "convention", "--path", str(initialized_repo)])
+    runner.invoke(app, ["remember", "deploy", "run migrations", "--type", "reference", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["recall", "", "--type", "convention", "--path", str(initialized_repo), "--format", "json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["path"] == "note:auth"
+
+
+def test_learn_with_type(initialized_repo, runner):
+    result = runner.invoke(app, ["learn", "wal", "WAL mode", "--type", "gotcha", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    result = runner.invoke(app, ["recall-learnings", "", "--path", str(initialized_repo), "--format", "json"])
+    data = json.loads(result.output)
+    assert data[0]["type"] == "gotcha"
+
+
+def test_recall_learnings_filter_by_type(initialized_repo, runner):
+    runner.invoke(app, ["learn", "wal", "WAL mode", "--type", "gotcha", "--path", str(initialized_repo)])
+    runner.invoke(app, ["learn", "fts", "FTS5 triggers", "--type", "pattern", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["recall-learnings", "", "--type", "gotcha", "--path", str(initialized_repo), "--format", "json"])
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["path"] == "learning:wal"
+
+
+def test_task_add_with_type(initialized_repo, runner):
+    result = runner.invoke(app, ["task", "add", "fix-bug", "fix login", "--type", "bug", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    result = runner.invoke(app, ["task", "list", "--path", str(initialized_repo), "--format", "json"])
+    data = json.loads(result.output)
+    assert data[0]["type"] == "bug"
+
+
+def test_task_list_filter_by_type(initialized_repo, runner):
+    runner.invoke(app, ["task", "add", "t1", "fix login", "--type", "bug", "--path", str(initialized_repo)])
+    runner.invoke(app, ["task", "add", "t2", "add search", "--type", "feature", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["task", "list", "--type", "bug", "--path", str(initialized_repo), "--format", "json"])
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["path"] == "task:t1"
+
+
+def test_plan_create_with_type(initialized_repo, runner):
+    result = runner.invoke(app, ["plan", "create", "p1", "plan content", "--type", "protocol", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    result = runner.invoke(app, ["plan", "get", "p1", "--format", "json", "--path", str(initialized_repo)])
+    data = json.loads(result.output)
+    assert data["type"] == "protocol"
+
+
+def test_plan_list_filter_by_type(initialized_repo, runner):
+    runner.invoke(app, ["plan", "create", "p1", "plan one", "--type", "design", "--path", str(initialized_repo)])
+    runner.invoke(app, ["plan", "create", "p2", "plan two", "--type", "protocol", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["plan", "list", "--type", "protocol", "--status", "", "--path", str(initialized_repo), "--format", "json"])
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["path"] == "plan:p2"

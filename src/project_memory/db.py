@@ -50,7 +50,31 @@ MIGRATIONS = [
         ALTER TABLE documents ADD COLUMN status TEXT;
         ALTER TABLE documents ADD COLUMN "group" TEXT;
     """),
+    # Version 2 → 3: add created_at, updated_at, type columns.
+    lambda conn: _migrate_v2_to_v3(conn),
 ]
+
+
+def _migrate_v2_to_v3(conn: sqlite3.Connection):
+    """Add created_at, updated_at, type columns and backfill timestamps from indexed_at."""
+    for stmt in [
+        "ALTER TABLE documents ADD COLUMN created_at TEXT",
+        "ALTER TABLE documents ADD COLUMN updated_at TEXT",
+        "ALTER TABLE documents ADD COLUMN type TEXT",
+    ]:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
+    # Backfill: copy indexed_at into created_at and updated_at for existing rows
+    conn.execute("""
+        UPDATE documents
+        SET created_at = COALESCE(indexed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at = COALESCE(indexed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        WHERE created_at IS NULL
+    """)
+    conn.commit()
 
 
 def _migrate_from_v0(conn: sqlite3.Connection):
@@ -67,6 +91,9 @@ def _migrate_from_v0(conn: sqlite3.Connection):
         "ALTER TABLE documents ADD COLUMN content_hash TEXT",
         "ALTER TABLE documents ADD COLUMN status TEXT",
         'ALTER TABLE documents ADD COLUMN "group" TEXT',
+        "ALTER TABLE documents ADD COLUMN created_at TEXT",
+        "ALTER TABLE documents ADD COLUMN updated_at TEXT",
+        "ALTER TABLE documents ADD COLUMN type TEXT",
     ]:
         try:
             conn.execute(stmt)
@@ -170,14 +197,15 @@ class ProjectMemoryDB:
         if existing and existing["content_hash"] == new_hash:
             return False  # content unchanged, skip
 
+        now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
         if existing:
             self.conn.execute(
-                "UPDATE documents SET content = ?, content_hash = ?, indexed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), source_type = ? WHERE id = ?",
+                f"UPDATE documents SET content = ?, content_hash = ?, indexed_at = {now}, updated_at = {now}, source_type = ? WHERE id = ?",
                 (content, new_hash, source_type, existing["id"]),
             )
         else:
             self.conn.execute(
-                "INSERT INTO documents(path, content, content_hash, source_type) VALUES (?, ?, ?, ?)",
+                f"INSERT INTO documents(path, content, content_hash, source_type, created_at, updated_at) VALUES (?, ?, ?, ?, {now}, {now})",
                 (path, content, new_hash, source_type),
             )
         self.conn.commit()
@@ -226,7 +254,7 @@ class ProjectMemoryDB:
     # --- Generic helpers for typed entries ---
 
     def _put(self, prefix: str, source_type: str, key: str, content: str,
-             status: str = None, group: str = None) -> bool:
+             status: str = None, group: str = None, type: str = None) -> bool:
         """Insert or update a typed entry. Returns True if written, False if unchanged."""
         path = f"{prefix}:{key}"
         new_hash = content_hash(content)
@@ -236,15 +264,16 @@ class ProjectMemoryDB:
         if existing and existing["content_hash"] == new_hash and existing["status"] == status:
             return False
 
+        now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
         if existing:
             self.conn.execute(
-                'UPDATE documents SET content = ?, content_hash = ?, indexed_at = strftime(\'%Y-%m-%dT%H:%M:%fZ\', \'now\'), source_type = ?, status = ?, "group" = ? WHERE id = ?',
-                (content, new_hash, source_type, status, group, existing["id"]),
+                f'UPDATE documents SET content = ?, content_hash = ?, indexed_at = {now}, updated_at = {now}, source_type = ?, status = ?, "group" = ?, type = ? WHERE id = ?',
+                (content, new_hash, source_type, status, group, type, existing["id"]),
             )
         else:
             self.conn.execute(
-                'INSERT INTO documents(path, content, content_hash, source_type, status, "group") VALUES (?, ?, ?, ?, ?, ?)',
-                (path, content, new_hash, source_type, status, group),
+                f'INSERT INTO documents(path, content, content_hash, source_type, status, "group", type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, {now}, {now})',
+                (path, content, new_hash, source_type, status, group, type),
             )
         self.conn.commit()
         return True
@@ -257,13 +286,13 @@ class ProjectMemoryDB:
         return cur.rowcount > 0
 
     def _list_typed(self, source_type: str, query: str = None, status: str = None,
-                    group: str = None, limit: int = 20) -> List[dict]:
+                    group: str = None, type: str = None, limit: int = 20) -> List[dict]:
         """List or search entries of a given source_type."""
         if query:
             normalized = normalize_fts_query(query)
             if not normalized:
                 return []
-            sql = """SELECT d.id, d.path, d.content, d.indexed_at, d.status, d."group", bm25(documents_fts) AS rank
+            sql = """SELECT d.id, d.path, d.content, d.indexed_at, d.status, d."group", d.type, d.created_at, d.updated_at, bm25(documents_fts) AS rank
                      FROM documents d
                      JOIN documents_fts f ON d.id = f.rowid
                      WHERE documents_fts MATCH ? AND d.source_type = ?"""
@@ -274,10 +303,13 @@ class ProjectMemoryDB:
             if group:
                 sql += ' AND d."group" = ?'
                 params.append(group)
+            if type:
+                sql += " AND d.type = ?"
+                params.append(type)
             sql += " ORDER BY rank LIMIT ?"
             params.append(limit)
         else:
-            sql = 'SELECT id, path, content, indexed_at, status, "group" FROM documents WHERE source_type = ?'
+            sql = 'SELECT id, path, content, indexed_at, status, "group", type, created_at, updated_at FROM documents WHERE source_type = ?'
             params = [source_type]
             if status:
                 sql += " AND status = ?"
@@ -285,50 +317,71 @@ class ProjectMemoryDB:
             if group:
                 sql += ' AND "group" = ?'
                 params.append(group)
+            if type:
+                sql += " AND type = ?"
+                params.append(type)
             sql += " ORDER BY path LIMIT ?"
             params.append(limit)
 
         cur = self.conn.execute(sql, params)
         return [dict(row) for row in cur.fetchall()]
 
+    def _types_in_use(self, source_type: str) -> List[str]:
+        """Return distinct non-null type values for a given source_type."""
+        cur = self.conn.execute(
+            "SELECT DISTINCT type FROM documents WHERE source_type = ? AND type IS NOT NULL ORDER BY type",
+            (source_type,),
+        )
+        return [row[0] for row in cur.fetchall()]
+
     # --- Notes ---
 
-    def remember(self, key: str, content: str) -> bool:
+    def remember(self, key: str, content: str, type: str = None) -> bool:
         """Store a note in memory."""
-        return self._put("note", "note", key, content)
+        return self._put("note", "note", key, content, type=type)
 
     def forget(self, key: str) -> bool:
         """Remove a note by key."""
         return self._remove("note", "note", key)
 
-    def recall(self, query: str = None, limit: int = 20) -> List[dict]:
+    def recall(self, query: str = None, type: str = None, limit: int = 20) -> List[dict]:
         """Retrieve notes. Search by content if query given, else list all."""
-        return self._list_typed("note", query=query, limit=limit)
+        return self._list_typed("note", query=query, type=type, limit=limit)
+
+    def recall_with_types(self, query: str = None, type: str = None, limit: int = 20) -> tuple:
+        """Retrieve notes plus types_in_use. Returns (results, types_in_use)."""
+        results = self.recall(query=query, type=type, limit=limit)
+        return results, self._types_in_use("note")
 
     # --- Learnings ---
 
-    def learn(self, key: str, content: str) -> bool:
+    def learn(self, key: str, content: str, type: str = None) -> bool:
         """Store a learning."""
-        return self._put("learning", "learning", key, content)
+        return self._put("learning", "learning", key, content, type=type)
 
     def forget_learning(self, key: str) -> bool:
         """Remove a learning by key."""
         return self._remove("learning", "learning", key)
 
-    def recall_learnings(self, query: str = None, limit: int = 20) -> List[dict]:
+    def recall_learnings(self, query: str = None, type: str = None, limit: int = 20) -> List[dict]:
         """Retrieve learnings. Search by content if query given, else list all."""
-        return self._list_typed("learning", query=query, limit=limit)
+        return self._list_typed("learning", query=query, type=type, limit=limit)
+
+    def recall_learnings_with_types(self, query: str = None, type: str = None, limit: int = 20) -> tuple:
+        """Retrieve learnings plus types_in_use. Returns (results, types_in_use)."""
+        results = self.recall_learnings(query=query, type=type, limit=limit)
+        return results, self._types_in_use("learning")
 
     # --- Tasks ---
 
-    def task_add(self, key: str, content: str, group: str = None) -> bool:
+    def task_add(self, key: str, content: str, group: str = None, type: str = None) -> bool:
         """Add a task with status 'pending'."""
-        return self._put("task", "task", key, content, status="pending", group=group)
+        return self._put("task", "task", key, content, status="pending", group=group, type=type)
 
     def task_update(self, key: str, status: str = None, content: str = None, group: str = None) -> bool:
         """Update a task's status, content, or group. Returns True if changed."""
         path = f"task:{key}"
-        cur = self.conn.execute('SELECT id, content, status, "group" FROM documents WHERE path = ? AND source_type = ?', (path, "task"))
+        cur = self.conn.execute('SELECT id, content, status, "group", type FROM documents WHERE path = ? AND source_type = ?', (path, "task"))
         existing = cur.fetchone()
         if not existing:
             return False
@@ -336,28 +389,36 @@ class ProjectMemoryDB:
         new_content = content if content is not None else existing["content"]
         new_status = status if status is not None else existing["status"]
         new_group = group if group is not None else existing["group"]
+        existing_type = existing["type"]
 
-        return self._put("task", "task", key, new_content, status=new_status, group=new_group)
+        return self._put("task", "task", key, new_content, status=new_status, group=new_group, type=existing_type)
 
     def task_remove(self, key: str) -> bool:
         """Remove a task by key."""
         return self._remove("task", "task", key)
 
-    def task_list(self, status: str = None, group: str = None, query: str = None, limit: int = 50) -> List[dict]:
+    def task_list(self, status: str = None, group: str = None, query: str = None,
+                  type: str = None, limit: int = 50) -> List[dict]:
         """List tasks, optionally filtered by status and/or group."""
-        return self._list_typed("task", query=query, status=status, group=group, limit=limit)
+        return self._list_typed("task", query=query, status=status, group=group, type=type, limit=limit)
+
+    def task_list_with_types(self, status: str = None, group: str = None, query: str = None,
+                             type: str = None, limit: int = 50) -> tuple:
+        """List tasks plus types_in_use. Returns (results, types_in_use)."""
+        results = self.task_list(status=status, group=group, query=query, type=type, limit=limit)
+        return results, self._types_in_use("task")
 
     # --- Plans ---
 
-    def plan_create(self, key: str, content: str) -> bool:
+    def plan_create(self, key: str, content: str, type: str = None) -> bool:
         """Create or update a plan with status 'active'."""
-        return self._put("plan", "plan", key, content, status="active")
+        return self._put("plan", "plan", key, content, status="active", type=type)
 
     def plan_get(self, key: str) -> Optional[dict]:
         """Get a single plan by key."""
         path = f"plan:{key}"
         cur = self.conn.execute(
-            'SELECT id, path, content, indexed_at, status, "group" FROM documents WHERE path = ? AND source_type = ?',
+            'SELECT id, path, content, indexed_at, status, "group", type, created_at, updated_at FROM documents WHERE path = ? AND source_type = ?',
             (path, "plan"),
         )
         row = cur.fetchone()
@@ -367,15 +428,22 @@ class ProjectMemoryDB:
         """Archive a plan. Returns True if changed."""
         path = f"plan:{key}"
         cur = self.conn.execute(
-            "UPDATE documents SET status = 'archived', indexed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE path = ? AND source_type = ? AND status = 'active'",
+            "UPDATE documents SET status = 'archived', indexed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE path = ? AND source_type = ? AND status = 'active'",
             (path, "plan"),
         )
         self.conn.commit()
         return cur.rowcount > 0
 
-    def plan_list(self, status: str = "active", query: str = None, limit: int = 20) -> List[dict]:
+    def plan_list(self, status: str = "active", query: str = None,
+                  type: str = None, limit: int = 20) -> List[dict]:
         """List plans, defaulting to active only."""
-        return self._list_typed("plan", query=query, status=status, limit=limit)
+        return self._list_typed("plan", query=query, status=status, type=type, limit=limit)
+
+    def plan_list_with_types(self, status: str = "active", query: str = None,
+                             type: str = None, limit: int = 20) -> tuple:
+        """List plans plus types_in_use. Returns (results, types_in_use)."""
+        results = self.plan_list(status=status, query=query, type=type, limit=limit)
+        return results, self._types_in_use("plan")
 
     def close(self):
         self.conn.close()

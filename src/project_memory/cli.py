@@ -18,7 +18,7 @@ app.add_typer(task_app, name="task")
 app.add_typer(plan_app, name="plan")
 
 RepoPath = Annotated[
-    str, typer.Option("--path", "-p", help="Repository root", envvar="OPENBRAIN_ROOT")
+    str, typer.Option("--path", "-p", help="Repository root", envvar="PROJECT_MEMORY_ROOT")
 ]
 
 
@@ -45,7 +45,8 @@ def _format_list(results: list[dict], prefix: str, output_format: OutputFormat, 
             key = r["path"].removeprefix(f"{prefix}:")
             status = f" ({r['status']})" if r.get("status") else ""
             group = f" [{r['group']}]" if r.get("group") else ""
-            typer.echo(f"[{key}]{status}{group}")
+            entry_type = f" <{r['type']}>" if r.get("type") else ""
+            typer.echo(f"[{key}]{status}{group}{entry_type}")
             typer.echo(f"  {r['content'][:300]}\n")
 
 
@@ -134,11 +135,12 @@ def stats(path: RepoPath = "."):
 def remember(
     key: str = typer.Argument(..., help="Short identifier for this note"),
     content: str = typer.Argument(..., help="Text to remember"),
+    type: str = typer.Option("", "--type", "-t", help="Classification type (e.g. convention, reference, decision)"),
     path: RepoPath = ".",
 ):
     """Store a note in project memory."""
     with ProjectMemoryDB(root=Path(path).resolve()) as db:
-        written = db.remember(key, content)
+        written = db.remember(key, content, type=type or None)
     if written:
         typer.echo(f"Remembered '{key}'")
     else:
@@ -163,13 +165,14 @@ def forget(
 @app.command()
 def recall(
     query: str = typer.Argument("", help="Search query (empty lists all notes)"),
+    type: str = typer.Option("", "--type", "-t", help="Filter by type"),
     path: RepoPath = ".",
     output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
 ):
     """Retrieve notes from project memory."""
     with ProjectMemoryDB(root=Path(path).resolve()) as db:
-        results = db.recall(query=query or None, limit=limit)
+        results = db.recall(query=query or None, type=type or None, limit=limit)
     _format_list(results, "note", output_format, "No notes found")
 
 
@@ -180,11 +183,12 @@ def recall(
 def learn(
     key: str = typer.Argument(..., help="Short identifier for this learning"),
     content: str = typer.Argument(..., help="What was learned"),
+    type: str = typer.Option("", "--type", "-t", help="Classification type (e.g. gotcha, pattern, tool-tip)"),
     path: RepoPath = ".",
 ):
     """Store a learning — knowledge discovered during development."""
     with ProjectMemoryDB(root=Path(path).resolve()) as db:
-        written = db.learn(key, content)
+        written = db.learn(key, content, type=type or None)
     if written:
         typer.echo(f"Learned '{key}'")
     else:
@@ -194,13 +198,14 @@ def learn(
 @app.command("recall-learnings")
 def recall_learnings_command(
     query: str = typer.Argument("", help="Search query (empty lists all)"),
+    type: str = typer.Option("", "--type", "-t", help="Filter by type"),
     path: RepoPath = ".",
     output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
 ):
     """Retrieve learnings from project memory."""
     with ProjectMemoryDB(root=Path(path).resolve()) as db:
-        results = db.recall_learnings(query=query or None, limit=limit)
+        results = db.recall_learnings(query=query or None, type=type or None, limit=limit)
     _format_list(results, "learning", output_format, "No learnings found")
 
 
@@ -227,11 +232,12 @@ def task_add_command(
     key: str = typer.Argument(..., help="Short identifier for this task"),
     content: str = typer.Argument(..., help="Task description"),
     group: str = typer.Option("", "--group", "-g", help="Group name (e.g. 'v0.2', 'auth-feature')"),
+    type: str = typer.Option("", "--type", "-t", help="Classification type (e.g. bug, feature, chore)"),
     path: RepoPath = ".",
 ):
     """Add a task."""
     with ProjectMemoryDB(root=Path(path).resolve()) as db:
-        db.task_add(key, content, group=group or None)
+        db.task_add(key, content, group=group or None, type=type or None)
     typer.echo(f"Added task '{key}'" + (f" [{group}]" if group else ""))
 
 
@@ -239,6 +245,7 @@ def task_add_command(
 def task_list_command(
     status: str = typer.Option("", "--status", "-s", help="Filter by status (pending/in_progress/done)"),
     group: str = typer.Option("", "--group", "-g", help="Filter by group"),
+    type: str = typer.Option("", "--type", "-t", help="Filter by type (e.g. bug, feature, chore)"),
     query: str = typer.Argument("", help="Search query"),
     path: RepoPath = ".",
     output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
@@ -246,7 +253,7 @@ def task_list_command(
 ):
     """List tasks."""
     with ProjectMemoryDB(root=Path(path).resolve()) as db:
-        results = db.task_list(status=status or None, group=group or None, query=query or None, limit=limit)
+        results = db.task_list(status=status or None, group=group or None, type=type or None, query=query or None, limit=limit)
     _format_list(results, "task", output_format, "No tasks found")
 
 
@@ -290,11 +297,12 @@ def task_remove_command(
 def plan_create_command(
     key: str = typer.Argument(..., help="Short identifier for this plan"),
     content: str = typer.Argument(..., help="Plan content (markdown)"),
+    type: str = typer.Option("", "--type", "-t", help="Classification type (e.g. protocol, design, checklist)"),
     path: RepoPath = ".",
 ):
     """Create or update a plan."""
     with ProjectMemoryDB(root=Path(path).resolve()) as db:
-        db.plan_create(key, content)
+        db.plan_create(key, content, type=type or None)
     typer.echo(f"Created plan '{key}'")
 
 
@@ -321,6 +329,7 @@ def plan_get_command(
 @plan_app.command("list")
 def plan_list_command(
     status: str = typer.Option("active", "--status", "-s", help="Filter by status (active/archived, empty for all)"),
+    type: str = typer.Option("", "--type", "-t", help="Filter by type (e.g. protocol, design, checklist)"),
     query: str = typer.Argument("", help="Search query"),
     path: RepoPath = ".",
     output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
@@ -328,7 +337,7 @@ def plan_list_command(
 ):
     """List plans."""
     with ProjectMemoryDB(root=Path(path).resolve()) as db:
-        results = db.plan_list(status=status or None, query=query or None, limit=limit)
+        results = db.plan_list(status=status or None, type=type or None, query=query or None, limit=limit)
     _format_list(results, "plan", output_format, "No plans found")
 
 

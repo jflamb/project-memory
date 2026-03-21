@@ -101,10 +101,10 @@ def create_stdio_server() -> FastMCP:
         return {"documents": count, "size_bytes": size_bytes}
 
     @mcp.tool()
-    def remember(key: str, content: str) -> dict:
-        """Store a note in project memory. Key is a short identifier (e.g. 'auth-pattern', 'deploy-steps'). Content is the text to remember."""
+    def remember(key: str, content: str, type: str = "") -> dict:
+        """Store a note in project memory. Key is a short identifier (e.g. 'auth-pattern', 'deploy-steps'). Content is the text to remember. Provide a type to classify this note (e.g. 'convention', 'reference', 'decision'). Check existing types with recall first and reuse one if appropriate before introducing a new type."""
         with _ensure_db() as db:
-            written = db.remember(key, content)
+            written = db.remember(key, content, type=type or None)
         return {"key": key, "written": written}
 
     @mcp.tool()
@@ -115,25 +115,27 @@ def create_stdio_server() -> FastMCP:
         return {"key": key, "deleted": deleted}
 
     @mcp.tool()
-    def recall(query: str = "", limit: int = 20) -> list[dict]:
-        """Retrieve notes from project memory. If query is given, search notes by content. If empty, list all notes."""
+    def recall(query: str = "", type: str = "", limit: int = 20) -> dict:
+        """Retrieve notes from project memory. If query is given, search notes by content. If empty, list all notes. Filter by type if provided."""
         with _ensure_db() as db:
-            return db.recall(query=query or None, limit=limit)
+            results, types_in_use = db.recall_with_types(query=query or None, type=type or None, limit=limit)
+        return {"results": results, "types_in_use": types_in_use}
 
     # --- Learnings ---
 
     @mcp.tool()
-    def learn(key: str, content: str) -> dict:
-        """Store a learning — knowledge discovered during development (e.g. 'sqlite-alter-limits', 'fts5-trigger-pattern'). Content is what was learned."""
+    def learn(key: str, content: str, type: str = "") -> dict:
+        """Store a learning — knowledge discovered during development (e.g. 'sqlite-alter-limits', 'fts5-trigger-pattern'). Content is what was learned. Provide a type to classify this learning (e.g. 'gotcha', 'pattern', 'tool-tip'). Check existing types with recall_learnings first and reuse one if appropriate before introducing a new type."""
         with _ensure_db() as db:
-            written = db.learn(key, content)
+            written = db.learn(key, content, type=type or None)
         return {"key": key, "written": written}
 
     @mcp.tool()
-    def recall_learnings(query: str = "", limit: int = 20) -> list[dict]:
-        """Retrieve learnings. If query is given, search by content. If empty, list all learnings."""
+    def recall_learnings(query: str = "", type: str = "", limit: int = 20) -> dict:
+        """Retrieve learnings. If query is given, search by content. If empty, list all learnings. Filter by type if provided."""
         with _ensure_db() as db:
-            return db.recall_learnings(query=query or None, limit=limit)
+            results, types_in_use = db.recall_learnings_with_types(query=query or None, type=type or None, limit=limit)
+        return {"results": results, "types_in_use": types_in_use}
 
     @mcp.tool()
     def forget_learning(key: str) -> dict:
@@ -145,10 +147,10 @@ def create_stdio_server() -> FastMCP:
     # --- Tasks ---
 
     @mcp.tool()
-    def task_add(key: str, content: str, group: str = "") -> dict:
-        """Add a task with status 'pending'. Key is a short identifier. Group is optional (e.g. 'v0.2', 'auth-feature')."""
+    def task_add(key: str, content: str, group: str = "", type: str = "") -> dict:
+        """Add a task with status 'pending'. Key is a short identifier. Group is optional (e.g. 'v0.2', 'auth-feature'). Provide a type to classify this task (e.g. 'bug', 'feature', 'chore', 'spike')."""
         with _ensure_db() as db:
-            written = db.task_add(key, content, group=group or None)
+            written = db.task_add(key, content, group=group or None, type=type or None)
         return {"key": key, "written": written}
 
     @mcp.tool()
@@ -164,15 +166,17 @@ def create_stdio_server() -> FastMCP:
         return {"key": key, "updated": updated}
 
     @mcp.tool()
-    def task_list(status: str = "", group: str = "", query: str = "", limit: int = 50) -> list[dict]:
-        """List tasks. Filter by status ('pending', 'in_progress', 'done') and/or group. Search by content with query."""
+    def task_list(status: str = "", group: str = "", type: str = "", query: str = "", limit: int = 50) -> dict:
+        """List tasks. Filter by status ('pending', 'in_progress', 'done'), group, and/or type. Search by content with query."""
         with _ensure_db() as db:
-            return db.task_list(
+            results, types_in_use = db.task_list_with_types(
                 status=status or None,
                 group=group or None,
+                type=type or None,
                 query=query or None,
                 limit=limit,
             )
+        return {"results": results, "types_in_use": types_in_use}
 
     @mcp.tool()
     def task_remove(key: str) -> dict:
@@ -184,10 +188,10 @@ def create_stdio_server() -> FastMCP:
     # --- Plans ---
 
     @mcp.tool()
-    def plan_create(key: str, content: str) -> dict:
-        """Create or update a plan. Content is markdown. Status starts as 'active'."""
+    def plan_create(key: str, content: str, type: str = "") -> dict:
+        """Create or update a plan. Content is markdown. Status starts as 'active'. Provide a type to classify this plan (e.g. 'protocol', 'design', 'checklist')."""
         with _ensure_db() as db:
-            written = db.plan_create(key, content)
+            written = db.plan_create(key, content, type=type or None)
         return {"key": key, "written": written}
 
     @mcp.tool()
@@ -198,14 +202,16 @@ def create_stdio_server() -> FastMCP:
         return plan or {"error": f"No plan found with key '{key}'"}
 
     @mcp.tool()
-    def plan_list(status: str = "active", query: str = "", limit: int = 20) -> list[dict]:
-        """List plans. Defaults to active plans. Set status to 'archived' or '' for all."""
+    def plan_list(status: str = "active", type: str = "", query: str = "", limit: int = 20) -> dict:
+        """List plans. Defaults to active plans. Set status to 'archived' or '' for all. Filter by type if provided."""
         with _ensure_db() as db:
-            return db.plan_list(
+            results, types_in_use = db.plan_list_with_types(
                 status=status or None,
+                type=type or None,
                 query=query or None,
                 limit=limit,
             )
+        return {"results": results, "types_in_use": types_in_use}
 
     @mcp.tool()
     def plan_archive(key: str) -> dict:

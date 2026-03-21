@@ -467,3 +467,242 @@ def test_normalize_multiple_terms():
 
 def test_normalize_preserves_underscores():
     assert normalize_fts_query("my_func") == '"my_func"'
+
+
+# --- schema evolution: migration v2 to v3 ---
+
+
+def test_migrate_v2_to_v3(tmp_path):
+    """Simulate a v2 database and verify migration adds created_at, updated_at, type columns."""
+    db_dir = tmp_path / ".project-memory"
+    db_dir.mkdir()
+    db_path = db_dir / "project_memory.db"
+
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE documents (
+            id INTEGER PRIMARY KEY,
+            path TEXT UNIQUE NOT NULL,
+            content TEXT NOT NULL,
+            source_type TEXT DEFAULT 'file',
+            indexed_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            content_hash TEXT,
+            status TEXT,
+            "group" TEXT
+        );
+        CREATE VIRTUAL TABLE documents_fts USING fts5(path, content, content='documents', content_rowid='id');
+        CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts(rowid, path, content) VALUES (new.id, new.path, new.content);
+        END;
+        CREATE TRIGGER documents_ad AFTER DELETE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, path, content) VALUES ('delete', old.id, old.path, old.content);
+        END;
+        CREATE TRIGGER documents_au AFTER UPDATE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, path, content) VALUES ('delete', old.id, old.path, old.content);
+            INSERT INTO documents_fts(rowid, path, content) VALUES (new.id, new.path, new.content);
+        END;
+    """)
+    conn.execute(
+        "INSERT INTO documents(path, content, source_type, indexed_at) VALUES ('note:deploy', 'run migrations', 'note', '2026-03-20T10:00:00.000Z')"
+    )
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+
+    with ProjectMemoryDB(root=tmp_path) as db:
+        # Existing note should still work
+        notes = db.recall()
+        assert len(notes) == 1
+        # created_at and updated_at should be backfilled from indexed_at
+        row = db.conn.execute("SELECT created_at, updated_at, type FROM documents WHERE path = 'note:deploy'").fetchone()
+        assert row["created_at"] == "2026-03-20T10:00:00.000Z"
+        assert row["updated_at"] == "2026-03-20T10:00:00.000Z"
+        assert row["type"] is None  # backwards compatible
+
+
+# --- schema evolution: timestamps ---
+
+
+def test_remember_sets_timestamps(db):
+    db.remember("key1", "content")
+    row = db.conn.execute("SELECT created_at, updated_at FROM documents WHERE path = 'note:key1'").fetchone()
+    assert row["created_at"] is not None
+    assert row["updated_at"] is not None
+
+
+def test_remember_update_preserves_created_at(db):
+    db.remember("key1", "v1")
+    row1 = db.conn.execute("SELECT created_at, updated_at FROM documents WHERE path = 'note:key1'").fetchone()
+    created_at_1 = row1["created_at"]
+
+    import time; time.sleep(0.01)
+    db.remember("key1", "v2")
+    row2 = db.conn.execute("SELECT created_at, updated_at FROM documents WHERE path = 'note:key1'").fetchone()
+    assert row2["created_at"] == created_at_1  # immutable
+    assert row2["updated_at"] >= row1["updated_at"]  # bumped
+
+
+def test_upsert_document_sets_timestamps(db):
+    db.upsert_document("file.txt", "content")
+    row = db.conn.execute("SELECT created_at, updated_at FROM documents WHERE path = 'file.txt'").fetchone()
+    assert row["created_at"] is not None
+    assert row["updated_at"] is not None
+
+
+def test_upsert_document_update_preserves_created_at(db):
+    db.upsert_document("file.txt", "v1")
+    row1 = db.conn.execute("SELECT created_at FROM documents WHERE path = 'file.txt'").fetchone()
+
+    db.upsert_document("file.txt", "v2")
+    row2 = db.conn.execute("SELECT created_at, updated_at FROM documents WHERE path = 'file.txt'").fetchone()
+    assert row2["created_at"] == row1["created_at"]
+
+
+def test_task_add_sets_timestamps(db):
+    db.task_add("t1", "task one")
+    row = db.conn.execute("SELECT created_at, updated_at FROM documents WHERE path = 'task:t1'").fetchone()
+    assert row["created_at"] is not None
+    assert row["updated_at"] is not None
+
+
+def test_plan_create_sets_timestamps(db):
+    db.plan_create("p1", "plan one")
+    row = db.conn.execute("SELECT created_at, updated_at FROM documents WHERE path = 'plan:p1'").fetchone()
+    assert row["created_at"] is not None
+    assert row["updated_at"] is not None
+
+
+def test_learn_sets_timestamps(db):
+    db.learn("l1", "learning one")
+    row = db.conn.execute("SELECT created_at, updated_at FROM documents WHERE path = 'learning:l1'").fetchone()
+    assert row["created_at"] is not None
+    assert row["updated_at"] is not None
+
+
+# --- schema evolution: type column ---
+
+
+def test_remember_with_type(db):
+    db.remember("auth-pattern", "use OAuth2", type="convention")
+    row = db.conn.execute("SELECT type FROM documents WHERE path = 'note:auth-pattern'").fetchone()
+    assert row["type"] == "convention"
+
+
+def test_remember_without_type(db):
+    db.remember("deploy", "run migrations")
+    row = db.conn.execute("SELECT type FROM documents WHERE path = 'note:deploy'").fetchone()
+    assert row["type"] is None
+
+
+def test_learn_with_type(db):
+    db.learn("sqlite-wal", "WAL enables concurrent reads", type="gotcha")
+    row = db.conn.execute("SELECT type FROM documents WHERE path = 'learning:sqlite-wal'").fetchone()
+    assert row["type"] == "gotcha"
+
+
+def test_task_add_with_type(db):
+    db.task_add("fix-bug", "fix the login bug", type="bug")
+    row = db.conn.execute("SELECT type FROM documents WHERE path = 'task:fix-bug'").fetchone()
+    assert row["type"] == "bug"
+
+
+def test_plan_create_with_type(db):
+    db.plan_create("release", "release checklist", type="checklist")
+    row = db.conn.execute("SELECT type FROM documents WHERE path = 'plan:release'").fetchone()
+    assert row["type"] == "checklist"
+
+
+# --- schema evolution: type filtering ---
+
+
+def test_recall_filter_by_type(db):
+    db.remember("auth", "OAuth2 pattern", type="convention")
+    db.remember("deploy", "deploy steps", type="reference")
+    db.remember("misc", "something else")
+    results = db.recall(type="convention")
+    assert len(results) == 1
+    assert results[0]["path"] == "note:auth"
+
+
+def test_recall_learnings_filter_by_type(db):
+    db.learn("wal", "WAL mode", type="gotcha")
+    db.learn("fts", "FTS5 triggers", type="pattern")
+    results = db.recall_learnings(type="gotcha")
+    assert len(results) == 1
+    assert results[0]["path"] == "learning:wal"
+
+
+def test_task_list_filter_by_type(db):
+    db.task_add("t1", "fix login", type="bug")
+    db.task_add("t2", "add search", type="feature")
+    results = db.task_list(type="bug")
+    assert len(results) == 1
+    assert results[0]["path"] == "task:t1"
+
+
+def test_plan_list_filter_by_type(db):
+    db.plan_create("p1", "release plan", type="checklist")
+    db.plan_create("p2", "branching rules", type="protocol")
+    results = db.plan_list(type="protocol", status=None)
+    assert len(results) == 1
+    assert results[0]["path"] == "plan:p2"
+
+
+# --- schema evolution: types_in_use ---
+
+
+def test_recall_returns_types_in_use(db):
+    db.remember("a", "content a", type="convention")
+    db.remember("b", "content b", type="reference")
+    db.remember("c", "content c", type="convention")
+    results, types_in_use = db.recall_with_types()
+    assert set(types_in_use) == {"convention", "reference"}
+
+
+def test_recall_learnings_returns_types_in_use(db):
+    db.learn("a", "content a", type="gotcha")
+    db.learn("b", "content b", type="pattern")
+    results, types_in_use = db.recall_learnings_with_types()
+    assert set(types_in_use) == {"gotcha", "pattern"}
+
+
+def test_task_list_returns_types_in_use(db):
+    db.task_add("t1", "fix login", type="bug")
+    db.task_add("t2", "add search", type="feature")
+    results, types_in_use = db.task_list_with_types()
+    assert set(types_in_use) == {"bug", "feature"}
+
+
+def test_plan_list_returns_types_in_use(db):
+    db.plan_create("p1", "plan one", type="design")
+    db.plan_create("p2", "plan two", type="protocol")
+    results, types_in_use = db.plan_list_with_types(status=None)
+    assert set(types_in_use) == {"design", "protocol"}
+
+
+def test_types_in_use_excludes_null(db):
+    db.remember("a", "with type", type="convention")
+    db.remember("b", "no type")
+    results, types_in_use = db.recall_with_types()
+    assert types_in_use == ["convention"]
+
+
+# --- schema evolution: list results include type ---
+
+
+def test_recall_results_include_type(db):
+    db.remember("auth", "OAuth2", type="convention")
+    results = db.recall()
+    assert results[0]["type"] == "convention"
+
+
+def test_task_list_results_include_type(db):
+    db.task_add("t1", "fix login", type="bug")
+    results = db.task_list()
+    assert results[0]["type"] == "bug"
+
+
+def test_plan_get_includes_type(db):
+    db.plan_create("p1", "plan content", type="design")
+    plan = db.plan_get("p1")
+    assert plan["type"] == "design"
