@@ -53,10 +53,12 @@ Task statuses: `pending`, `in_progress`, `done`. Groups are freeform strings (e.
 
 ### When to use them
 
+- **Starting a session**: Call `plan_list(type='protocol')` to load all active protocols. Follow them throughout the session.
 - **Starting a task**: `recall` and `recall_learnings` first, then `search` for relevant files
 - **Discovering something non-obvious**: `learn` with a descriptive key
 - **Tracking work**: `task_add` for items, `task_update` to mark progress
 - **Planning implementation**: `plan_create` with markdown content, `plan_archive` when done
+- **Before committing/PRing**: Re-check active protocols (`plan_list(type='protocol')`) for blast radius requirements
 - **After writing/deleting files**: `index` to keep the database current
 
 ### What not to do
@@ -69,15 +71,19 @@ Task statuses: `pending`, `in_progress`, `done`. Groups are freeform strings (e.
 
 ```
 src/project_memory/
-  db.py       — SQLite + FTS5 database layer (migrations, triggers, bm25)
-  index.py    — File discovery and content ingestion
-  search.py   — Search wrapper
-  cli.py      — Typer CLI with subcommands for all operations
-  server.py   — MCP servers (stdio for agents, HTTP for web)
+  db.py           — SQLite + FTS5 database layer (migrations, triggers, bm25)
+  index.py        — File discovery and content ingestion
+  search.py       — Search wrapper
+  portability.py  — Export/import to MEMORY.md
+  protocols.py    — Development protocol generation (blast-radius framework)
+  cli.py          — Typer CLI with subcommands for all operations
+  server.py       — MCP servers (stdio for agents, HTTP for web)
 tests/
-  test_db.py      — Database layer tests (81 total across all files)
-  test_cli.py     — CLI tests via CliRunner
-  test_server.py  — MCP server integration test
+  test_db.py          — Database layer tests
+  test_cli.py         — CLI tests via CliRunner
+  test_server.py      — MCP server integration tests
+  test_portability.py — Export/import round-trip tests
+  test_protocols.py   — Protocol generation tests
 ```
 
 ## Development rules

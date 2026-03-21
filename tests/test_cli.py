@@ -450,3 +450,32 @@ Auto-imported content.
     data = json.loads(result.output)
     assert len(data) == 1
     assert data[0]["type"] == "convention"
+
+
+# --- init --protocols ---
+
+
+def test_init_protocols_generates_protocols(tmp_path, runner):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    result = runner.invoke(app, ["init", "--protocols", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "protocol" in result.output.lower()
+
+    result = runner.invoke(app, ["plan", "list", "--type", "protocol", "--status", "", "--path", str(tmp_path), "--format", "json"])
+    data = json.loads(result.output)
+    assert len(data) >= 1
+
+
+def test_init_protocols_not_default(tmp_path, runner):
+    """Without --protocols, init should not generate protocols."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    result = runner.invoke(app, ["init", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+
+    result = runner.invoke(app, ["plan", "list", "--type", "protocol", "--status", "", "--path", str(tmp_path), "--format", "json"])
+    # Should have no protocols (or "No plans found" message)
+    if result.exit_code == 0 and result.output.strip().startswith("["):
+        data = json.loads(result.output)
+        assert len(data) == 0

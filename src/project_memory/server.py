@@ -7,6 +7,8 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+from typing import Optional
+
 from .db import ProjectMemoryDB
 from .index import index_repo as index_repository
 from .portability import export_memory as do_export, import_memory as do_import
@@ -20,6 +22,15 @@ def _resolve_root(root: str | None) -> Path:
 def _cwd_root() -> Path:
     """Resolve repo root from current working directory."""
     return Path(os.getcwd()).resolve()
+
+
+def _build_protocol_reminder(db: ProjectMemoryDB) -> Optional[str]:
+    """Return a protocol reminder string if any active protocols exist, else None."""
+    protocols = db.plan_list(type="protocol", status="active", limit=10)
+    if not protocols:
+        return None
+    names = [p["path"].split(":", 1)[1] for p in protocols]
+    return f"Active protocols: {', '.join(names)}. Check protocols for blast radius requirements before committing."
 
 
 def create_mcp_server(root: str | None = None) -> FastMCP:
@@ -106,7 +117,11 @@ def create_stdio_server() -> FastMCP:
         """Store a note in project memory. Key is a short identifier (e.g. 'auth-pattern', 'deploy-steps'). Content is the text to remember. Provide a type to classify this note (e.g. 'convention', 'reference', 'decision'). Check existing types with recall first and reuse one if appropriate before introducing a new type."""
         with _ensure_db() as db:
             written = db.remember(key, content, type=type or None)
-        return {"key": key, "written": written}
+            reminder = _build_protocol_reminder(db)
+        result = {"key": key, "written": written}
+        if reminder:
+            result["protocol_reminder"] = reminder
+        return result
 
     @mcp.tool()
     def forget(key: str) -> dict:
@@ -129,7 +144,11 @@ def create_stdio_server() -> FastMCP:
         """Store a learning — knowledge discovered during development (e.g. 'sqlite-alter-limits', 'fts5-trigger-pattern'). Content is what was learned. Provide a type to classify this learning (e.g. 'gotcha', 'pattern', 'tool-tip'). Check existing types with recall_learnings first and reuse one if appropriate before introducing a new type."""
         with _ensure_db() as db:
             written = db.learn(key, content, type=type or None)
-        return {"key": key, "written": written}
+            reminder = _build_protocol_reminder(db)
+        result = {"key": key, "written": written}
+        if reminder:
+            result["protocol_reminder"] = reminder
+        return result
 
     @mcp.tool()
     def recall_learnings(query: str = "", type: str = "", limit: int = 20) -> dict:
@@ -149,10 +168,14 @@ def create_stdio_server() -> FastMCP:
 
     @mcp.tool()
     def task_add(key: str, content: str, group: str = "", type: str = "") -> dict:
-        """Add a task with status 'pending'. Key is a short identifier. Group is optional (e.g. 'v0.2', 'auth-feature'). Provide a type to classify this task (e.g. 'bug', 'feature', 'chore', 'spike')."""
+        """Add a task with status 'pending'. Key is a short identifier. Group is optional (e.g. 'v0.2', 'auth-feature'). Provide a type to classify this task (e.g. 'bug', 'feature', 'chore', 'spike'). After adding, assess blast radius per project protocols."""
         with _ensure_db() as db:
             written = db.task_add(key, content, group=group or None, type=type or None)
-        return {"key": key, "written": written}
+            reminder = _build_protocol_reminder(db)
+        result = {"key": key, "written": written}
+        if reminder:
+            result["protocol_reminder"] = reminder
+        return result
 
     @mcp.tool()
     def task_update(key: str, status: str = "", content: str = "", group: str = "") -> dict:
@@ -193,7 +216,11 @@ def create_stdio_server() -> FastMCP:
         """Create or update a plan. Content is markdown. Status starts as 'active'. Provide a type to classify this plan (e.g. 'protocol', 'design', 'checklist')."""
         with _ensure_db() as db:
             written = db.plan_create(key, content, type=type or None)
-        return {"key": key, "written": written}
+            reminder = _build_protocol_reminder(db)
+        result = {"key": key, "written": written}
+        if reminder:
+            result["protocol_reminder"] = reminder
+        return result
 
     @mcp.tool()
     def plan_get(key: str) -> dict:

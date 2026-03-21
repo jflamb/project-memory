@@ -9,6 +9,7 @@ import typer
 from .db import ProjectMemoryDB
 from .index import index_repo
 from .portability import export_memory, import_memory
+from .protocols import generate_default_protocols
 from .search import search as search_docs
 from .server import create_app, create_stdio_server
 
@@ -55,7 +56,10 @@ def _format_list(results: list[dict], prefix: str, output_format: OutputFormat, 
 
 
 @app.command()
-def init(path: RepoPath = "."):
+def init(
+    protocols: bool = typer.Option(False, "--protocols", help="Generate default development protocols"),
+    path: RepoPath = ".",
+):
     """Initialize project memory database."""
     try:
         root = Path(path).resolve()
@@ -67,6 +71,10 @@ def init(path: RepoPath = "."):
                 result = import_memory(db, memory_md)
                 if result["imported"] > 0:
                     typer.echo(f"Auto-imported {result['imported']} entries from MEMORY.md")
+            # Generate protocols if requested
+            if protocols:
+                keys = generate_default_protocols(db, root)
+                typer.echo(f"Generated {len(keys)} protocol(s): {', '.join(keys)}")
     except PermissionError:
         typer.echo("Error: No write permission for this directory", err=True)
         raise typer.Exit(code=1)

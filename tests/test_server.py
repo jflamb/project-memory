@@ -175,3 +175,29 @@ Auto-imported on init.
         notes = db.recall()
         assert len(notes) == 1
         assert notes[0]["type"] == "context"
+
+
+# --- protocol_reminder in tool responses ---
+
+
+def test_protocol_reminder_present_when_protocols_exist(tmp_path):
+    """When protocols are active, write tool responses should include protocol_reminder."""
+    from project_memory.db import ProjectMemoryDB
+    from project_memory.protocols import generate_default_protocols
+    from project_memory.server import _build_protocol_reminder
+    with ProjectMemoryDB(root=tmp_path) as db:
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        generate_default_protocols(db, tmp_path)
+        reminder = _build_protocol_reminder(db)
+        assert reminder is not None
+        assert "protocol" in reminder.lower()
+
+
+def test_protocol_reminder_absent_when_no_protocols(tmp_path):
+    """Without protocols, reminder should be None."""
+    from project_memory.db import ProjectMemoryDB
+    from project_memory.server import _build_protocol_reminder
+    with ProjectMemoryDB(root=tmp_path) as db:
+        reminder = _build_protocol_reminder(db)
+        assert reminder is None
