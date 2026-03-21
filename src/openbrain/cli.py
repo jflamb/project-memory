@@ -9,7 +9,7 @@ import typer
 from .db import OpenBrainDB
 from .index import index_repo
 from .search import search as search_docs
-from .server import create_app
+from .server import create_app, create_stdio_server
 
 app = typer.Typer(help="OpenBrain — repo-scoped memory engine for AI agents")
 
@@ -98,6 +98,13 @@ def stats(path: RepoPath = "."):
         size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
     typer.echo(f"Documents: {count}")
     typer.echo(f"Database size: {size_str}")
+
+
+@app.command("serve-stdio")
+def serve_stdio_command():
+    """Run the MCP server over stdio for AI agent integration."""
+    mcp = create_stdio_server()
+    mcp.run(transport="stdio")
 
 
 @app.command("serve-mcp")
