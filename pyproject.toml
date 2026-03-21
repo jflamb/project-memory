@@ -1,11 +1,11 @@
 [project]
-name = "openbrain"
+name = "project-memory"
 version = "0.1.0"
 description = "OpenBrain: repo-scoped memory engine for AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [ {name = "Your Name", email = "your.email@example.com"} ]
+authors = [ {name = "jflamb"} ]
 keywords = ["AI", "memory", "sqlite", "semantic search", "mcp"]
 dependencies = [
   "mcp>=1.12.4",
@@ -15,8 +15,8 @@ dependencies = [
   "pydantic>=2.0.0"
 ]
 [project.urls]
-Homepage = "https://github.com/your/repo"
-Repository = "https://github.com/your/repo"
+Homepage = "https://github.com/jflamb/project-memory"
+Repository = "https://github.com/jflamb/project-memory"
 
 [project.scripts]
 openbrain = "openbrain.cli:app"
