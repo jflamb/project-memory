@@ -204,3 +204,95 @@ def test_forget_removes_note(initialized_repo, runner):
 def test_forget_missing_key(initialized_repo, runner):
     result = runner.invoke(app, ["forget", "nonexistent", "--path", str(initialized_repo)])
     assert result.exit_code == 1
+
+
+# --- learn / recall-learnings / forget-learning ---
+
+
+def test_learn_and_recall(initialized_repo, runner):
+    result = runner.invoke(app, ["learn", "sqlite-wal", "WAL enables concurrent reads", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Learned" in result.output
+
+    result = runner.invoke(app, ["recall-learnings", "", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "sqlite-wal" in result.output
+
+
+def test_forget_learning(initialized_repo, runner):
+    runner.invoke(app, ["learn", "temp", "temporary", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["forget-learning", "temp", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Forgot learning" in result.output
+
+
+# --- task ---
+
+
+def test_task_add_and_list(initialized_repo, runner):
+    result = runner.invoke(app, ["task", "add", "write-tests", "Write unit tests", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Added task" in result.output
+
+    result = runner.invoke(app, ["task", "list", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "write-tests" in result.output
+    assert "pending" in result.output
+
+
+def test_task_with_group(initialized_repo, runner):
+    runner.invoke(app, ["task", "add", "t1", "task one", "--group", "v0.2", "--path", str(initialized_repo)])
+    runner.invoke(app, ["task", "add", "t2", "task two", "--group", "v0.3", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["task", "list", "--group", "v0.2", "--path", str(initialized_repo)])
+    assert "t1" in result.output
+    assert "t2" not in result.output
+
+
+def test_task_update_status(initialized_repo, runner):
+    runner.invoke(app, ["task", "add", "t1", "task one", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["task", "update", "t1", "--status", "done", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+
+    result = runner.invoke(app, ["task", "list", "--status", "done", "--path", str(initialized_repo)])
+    assert "t1" in result.output
+
+
+def test_task_remove(initialized_repo, runner):
+    runner.invoke(app, ["task", "add", "t1", "task one", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["task", "remove", "t1", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Removed" in result.output
+
+
+# --- plan ---
+
+
+def test_plan_create_and_get(initialized_repo, runner):
+    result = runner.invoke(app, ["plan", "create", "auth", "## Steps\n1. Add OAuth", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Created plan" in result.output
+
+    result = runner.invoke(app, ["plan", "get", "auth", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Steps" in result.output
+
+
+def test_plan_list_and_archive(initialized_repo, runner):
+    runner.invoke(app, ["plan", "create", "p1", "plan one", "--path", str(initialized_repo)])
+    runner.invoke(app, ["plan", "create", "p2", "plan two", "--path", str(initialized_repo)])
+
+    result = runner.invoke(app, ["plan", "archive", "p1", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Archived" in result.output
+
+    result = runner.invoke(app, ["plan", "list", "--path", str(initialized_repo)])
+    assert "p2" in result.output
+    assert "p1" not in result.output
+
+
+def test_plan_get_json(initialized_repo, runner):
+    runner.invoke(app, ["plan", "create", "p1", "plan content", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["plan", "get", "p1", "--format", "json", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "active"

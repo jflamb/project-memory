@@ -2,7 +2,7 @@ import json
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 import typer
 
@@ -12,6 +12,10 @@ from .search import search as search_docs
 from .server import create_app, create_stdio_server
 
 app = typer.Typer(help="OpenBrain — repo-scoped memory engine for AI agents")
+task_app = typer.Typer(help="Manage tasks")
+plan_app = typer.Typer(help="Manage plans")
+app.add_typer(task_app, name="task")
+app.add_typer(plan_app, name="plan")
 
 RepoPath = Annotated[
     str, typer.Option("--path", "-p", help="Repository root", envvar="OPENBRAIN_ROOT")
@@ -22,6 +26,30 @@ class OutputFormat(str, Enum):
     table = "table"
     json = "json"
     plain = "plain"
+
+
+def _format_list(results: list[dict], prefix: str, output_format: OutputFormat, empty_msg: str):
+    """Shared formatting for list-style commands."""
+    if not results:
+        typer.echo(empty_msg, err=True)
+        raise typer.Exit(code=0)
+
+    if output_format == OutputFormat.json:
+        typer.echo(json.dumps(results, indent=2))
+    elif output_format == OutputFormat.plain:
+        for r in results:
+            key = r["path"].removeprefix(f"{prefix}:")
+            typer.echo(f"{key}: {r['content'][:100]}")
+    else:
+        for r in results:
+            key = r["path"].removeprefix(f"{prefix}:")
+            status = f" ({r['status']})" if r.get("status") else ""
+            group = f" [{r['group']}]" if r.get("group") else ""
+            typer.echo(f"[{key}]{status}{group}")
+            typer.echo(f"  {r['content'][:300]}\n")
+
+
+# --- Core commands ---
 
 
 @app.command()
@@ -71,7 +99,6 @@ def search_command(
         for doc in results:
             typer.echo(f"{doc['path']}: {doc['content'][:100]}")
     else:
-        # table format
         for doc in results:
             typer.echo(f"[{doc['id']}] {doc['path']}")
             snippet = doc["content"][:300].replace("\n", " ")
@@ -100,6 +127,9 @@ def stats(path: RepoPath = "."):
     typer.echo(f"Database size: {size_str}")
 
 
+# --- Notes ---
+
+
 @app.command()
 def remember(
     key: str = typer.Argument(..., help="Short identifier for this note"),
@@ -107,8 +137,7 @@ def remember(
     path: RepoPath = ".",
 ):
     """Store a note in project memory."""
-    root = Path(path).resolve()
-    with OpenBrainDB(root=root) as db:
+    with OpenBrainDB(root=Path(path).resolve()) as db:
         written = db.remember(key, content)
     if written:
         typer.echo(f"Remembered '{key}'")
@@ -122,8 +151,7 @@ def forget(
     path: RepoPath = ".",
 ):
     """Remove a note from project memory."""
-    root = Path(path).resolve()
-    with OpenBrainDB(root=root) as db:
+    with OpenBrainDB(root=Path(path).resolve()) as db:
         deleted = db.forget(key)
     if deleted:
         typer.echo(f"Forgot '{key}'")
@@ -140,24 +168,186 @@ def recall(
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
 ):
     """Retrieve notes from project memory."""
-    root = Path(path).resolve()
-    with OpenBrainDB(root=root) as db:
+    with OpenBrainDB(root=Path(path).resolve()) as db:
         results = db.recall(query=query or None, limit=limit)
-    if not results:
-        typer.echo("No notes found", err=True)
-        raise typer.Exit(code=0)
+    _format_list(results, "note", output_format, "No notes found")
+
+
+# --- Learnings ---
+
+
+@app.command()
+def learn(
+    key: str = typer.Argument(..., help="Short identifier for this learning"),
+    content: str = typer.Argument(..., help="What was learned"),
+    path: RepoPath = ".",
+):
+    """Store a learning — knowledge discovered during development."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        written = db.learn(key, content)
+    if written:
+        typer.echo(f"Learned '{key}'")
+    else:
+        typer.echo(f"'{key}' unchanged", err=True)
+
+
+@app.command("recall-learnings")
+def recall_learnings_command(
+    query: str = typer.Argument("", help="Search query (empty lists all)"),
+    path: RepoPath = ".",
+    output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+):
+    """Retrieve learnings from project memory."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        results = db.recall_learnings(query=query or None, limit=limit)
+    _format_list(results, "learning", output_format, "No learnings found")
+
+
+@app.command("forget-learning")
+def forget_learning_command(
+    key: str = typer.Argument(..., help="Key of the learning to remove"),
+    path: RepoPath = ".",
+):
+    """Remove a learning from project memory."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        deleted = db.forget_learning(key)
+    if deleted:
+        typer.echo(f"Forgot learning '{key}'")
+    else:
+        typer.echo(f"No learning found with key '{key}'", err=True)
+        raise typer.Exit(code=1)
+
+
+# --- Tasks ---
+
+
+@task_app.command("add")
+def task_add_command(
+    key: str = typer.Argument(..., help="Short identifier for this task"),
+    content: str = typer.Argument(..., help="Task description"),
+    group: str = typer.Option("", "--group", "-g", help="Group name (e.g. 'v0.2', 'auth-feature')"),
+    path: RepoPath = ".",
+):
+    """Add a task."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        db.task_add(key, content, group=group or None)
+    typer.echo(f"Added task '{key}'" + (f" [{group}]" if group else ""))
+
+
+@task_app.command("list")
+def task_list_command(
+    status: str = typer.Option("", "--status", "-s", help="Filter by status (pending/in_progress/done)"),
+    group: str = typer.Option("", "--group", "-g", help="Filter by group"),
+    query: str = typer.Argument("", help="Search query"),
+    path: RepoPath = ".",
+    output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
+    limit: int = typer.Option(50, "--limit", "-n", help="Max results"),
+):
+    """List tasks."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        results = db.task_list(status=status or None, group=group or None, query=query or None, limit=limit)
+    _format_list(results, "task", output_format, "No tasks found")
+
+
+@task_app.command("update")
+def task_update_command(
+    key: str = typer.Argument(..., help="Task key"),
+    status: str = typer.Option("", "--status", "-s", help="New status (pending/in_progress/done)"),
+    content: str = typer.Option("", "--content", "-c", help="New description"),
+    group: str = typer.Option("", "--group", "-g", help="New group"),
+    path: RepoPath = ".",
+):
+    """Update a task's status, content, or group."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        updated = db.task_update(key, status=status or None, content=content or None, group=group or None)
+    if updated:
+        typer.echo(f"Updated task '{key}'")
+    else:
+        typer.echo(f"No task found with key '{key}'", err=True)
+        raise typer.Exit(code=1)
+
+
+@task_app.command("remove")
+def task_remove_command(
+    key: str = typer.Argument(..., help="Task key to remove"),
+    path: RepoPath = ".",
+):
+    """Remove a task."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        deleted = db.task_remove(key)
+    if deleted:
+        typer.echo(f"Removed task '{key}'")
+    else:
+        typer.echo(f"No task found with key '{key}'", err=True)
+        raise typer.Exit(code=1)
+
+
+# --- Plans ---
+
+
+@plan_app.command("create")
+def plan_create_command(
+    key: str = typer.Argument(..., help="Short identifier for this plan"),
+    content: str = typer.Argument(..., help="Plan content (markdown)"),
+    path: RepoPath = ".",
+):
+    """Create or update a plan."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        db.plan_create(key, content)
+    typer.echo(f"Created plan '{key}'")
+
+
+@plan_app.command("get")
+def plan_get_command(
+    key: str = typer.Argument(..., help="Plan key"),
+    path: RepoPath = ".",
+    output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
+):
+    """Get a plan by key."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        plan = db.plan_get(key)
+    if not plan:
+        typer.echo(f"No plan found with key '{key}'", err=True)
+        raise typer.Exit(code=1)
 
     if output_format == OutputFormat.json:
-        typer.echo(json.dumps(results, indent=2))
-    elif output_format == OutputFormat.plain:
-        for note in results:
-            key = note["path"].removeprefix("note:")
-            typer.echo(f"{key}: {note['content'][:100]}")
+        typer.echo(json.dumps(plan, indent=2))
     else:
-        for note in results:
-            key = note["path"].removeprefix("note:")
-            typer.echo(f"[{key}]")
-            typer.echo(f"  {note['content'][:300]}\n")
+        typer.echo(f"[{key}] ({plan['status']})")
+        typer.echo(plan["content"])
+
+
+@plan_app.command("list")
+def plan_list_command(
+    status: str = typer.Option("active", "--status", "-s", help="Filter by status (active/archived, empty for all)"),
+    query: str = typer.Argument("", help="Search query"),
+    path: RepoPath = ".",
+    output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+):
+    """List plans."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        results = db.plan_list(status=status or None, query=query or None, limit=limit)
+    _format_list(results, "plan", output_format, "No plans found")
+
+
+@plan_app.command("archive")
+def plan_archive_command(
+    key: str = typer.Argument(..., help="Plan key to archive"),
+    path: RepoPath = ".",
+):
+    """Archive a plan."""
+    with OpenBrainDB(root=Path(path).resolve()) as db:
+        archived = db.plan_archive(key)
+    if archived:
+        typer.echo(f"Archived plan '{key}'")
+    else:
+        typer.echo(f"No active plan found with key '{key}'", err=True)
+        raise typer.Exit(code=1)
+
+
+# --- Server commands ---
 
 
 @app.command("serve-stdio")

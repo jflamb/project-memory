@@ -9,8 +9,8 @@ DEFAULT_DIR = ".openbrain"
 DEFAULT_DB = "openbrain.db"
 
 # Each migration takes a connection and applies one schema version bump.
-# Version 0 → 1: initial schema with FTS5 triggers, new columns.
 MIGRATIONS = [
+    # Version 0 → 1: initial schema with FTS5 triggers, new columns.
     lambda conn: conn.executescript("""
         CREATE TABLE IF NOT EXISTS documents (
             id INTEGER PRIMARY KEY,
@@ -45,6 +45,11 @@ MIGRATIONS = [
             VALUES (new.id, new.path, new.content);
         END;
     """),
+    # Version 1 → 2: add status and group columns for tasks/plans.
+    lambda conn: conn.executescript("""
+        ALTER TABLE documents ADD COLUMN status TEXT;
+        ALTER TABLE documents ADD COLUMN "group" TEXT;
+    """),
 ]
 
 
@@ -60,6 +65,8 @@ def _migrate_from_v0(conn: sqlite3.Connection):
         "ALTER TABLE documents ADD COLUMN source_type TEXT DEFAULT 'file'",
         "ALTER TABLE documents ADD COLUMN indexed_at TEXT",
         "ALTER TABLE documents ADD COLUMN content_hash TEXT",
+        "ALTER TABLE documents ADD COLUMN status TEXT",
+        'ALTER TABLE documents ADD COLUMN "group" TEXT',
     ]:
         try:
             conn.execute(stmt)
@@ -216,40 +223,159 @@ class OpenBrainDB:
     def document_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
 
-    def remember(self, key: str, content: str) -> bool:
-        """Store a note in memory. Key is a short identifier (used as path with note: prefix).
-        Returns True if written, False if unchanged."""
-        path = f"note:{key}"
-        return self.upsert_document(path, content, source_type="note")
+    # --- Generic helpers for typed entries ---
 
-    def forget(self, key: str) -> bool:
-        """Remove a note by key. Returns True if deleted, False if not found."""
-        path = f"note:{key}"
-        cur = self.conn.execute("DELETE FROM documents WHERE path = ? AND source_type = 'note'", (path,))
+    def _put(self, prefix: str, source_type: str, key: str, content: str,
+             status: str = None, group: str = None) -> bool:
+        """Insert or update a typed entry. Returns True if written, False if unchanged."""
+        path = f"{prefix}:{key}"
+        new_hash = content_hash(content)
+        cur = self.conn.execute("SELECT id, content_hash, status FROM documents WHERE path = ?", (path,))
+        existing = cur.fetchone()
+
+        if existing and existing["content_hash"] == new_hash and existing["status"] == status:
+            return False
+
+        if existing:
+            self.conn.execute(
+                'UPDATE documents SET content = ?, content_hash = ?, indexed_at = strftime(\'%Y-%m-%dT%H:%M:%fZ\', \'now\'), source_type = ?, status = ?, "group" = ? WHERE id = ?',
+                (content, new_hash, source_type, status, group, existing["id"]),
+            )
+        else:
+            self.conn.execute(
+                'INSERT INTO documents(path, content, content_hash, source_type, status, "group") VALUES (?, ?, ?, ?, ?, ?)',
+                (path, content, new_hash, source_type, status, group),
+            )
+        self.conn.commit()
+        return True
+
+    def _remove(self, prefix: str, source_type: str, key: str) -> bool:
+        """Remove a typed entry by key. Returns True if deleted."""
+        path = f"{prefix}:{key}"
+        cur = self.conn.execute("DELETE FROM documents WHERE path = ? AND source_type = ?", (path, source_type))
         self.conn.commit()
         return cur.rowcount > 0
 
-    def recall(self, query: str = None, limit: int = 20) -> List[dict]:
-        """Retrieve notes. If query is given, search notes by content. Otherwise list all notes."""
+    def _list_typed(self, source_type: str, query: str = None, status: str = None,
+                    group: str = None, limit: int = 20) -> List[dict]:
+        """List or search entries of a given source_type."""
         if query:
             normalized = normalize_fts_query(query)
             if not normalized:
                 return []
-            cur = self.conn.execute(
-                """SELECT d.id, d.path, d.content, d.indexed_at, bm25(documents_fts) AS rank
-                   FROM documents d
-                   JOIN documents_fts f ON d.id = f.rowid
-                   WHERE documents_fts MATCH ? AND d.source_type = 'note'
-                   ORDER BY rank
-                   LIMIT ?""",
-                (normalized, limit),
-            )
+            sql = """SELECT d.id, d.path, d.content, d.indexed_at, d.status, d."group", bm25(documents_fts) AS rank
+                     FROM documents d
+                     JOIN documents_fts f ON d.id = f.rowid
+                     WHERE documents_fts MATCH ? AND d.source_type = ?"""
+            params: list = [normalized, source_type]
+            if status:
+                sql += " AND d.status = ?"
+                params.append(status)
+            if group:
+                sql += ' AND d."group" = ?'
+                params.append(group)
+            sql += " ORDER BY rank LIMIT ?"
+            params.append(limit)
         else:
-            cur = self.conn.execute(
-                "SELECT id, path, content, indexed_at FROM documents WHERE source_type = 'note' ORDER BY path LIMIT ?",
-                (limit,),
-            )
+            sql = 'SELECT id, path, content, indexed_at, status, "group" FROM documents WHERE source_type = ?'
+            params = [source_type]
+            if status:
+                sql += " AND status = ?"
+                params.append(status)
+            if group:
+                sql += ' AND "group" = ?'
+                params.append(group)
+            sql += " ORDER BY path LIMIT ?"
+            params.append(limit)
+
+        cur = self.conn.execute(sql, params)
         return [dict(row) for row in cur.fetchall()]
+
+    # --- Notes ---
+
+    def remember(self, key: str, content: str) -> bool:
+        """Store a note in memory."""
+        return self._put("note", "note", key, content)
+
+    def forget(self, key: str) -> bool:
+        """Remove a note by key."""
+        return self._remove("note", "note", key)
+
+    def recall(self, query: str = None, limit: int = 20) -> List[dict]:
+        """Retrieve notes. Search by content if query given, else list all."""
+        return self._list_typed("note", query=query, limit=limit)
+
+    # --- Learnings ---
+
+    def learn(self, key: str, content: str) -> bool:
+        """Store a learning."""
+        return self._put("learning", "learning", key, content)
+
+    def forget_learning(self, key: str) -> bool:
+        """Remove a learning by key."""
+        return self._remove("learning", "learning", key)
+
+    def recall_learnings(self, query: str = None, limit: int = 20) -> List[dict]:
+        """Retrieve learnings. Search by content if query given, else list all."""
+        return self._list_typed("learning", query=query, limit=limit)
+
+    # --- Tasks ---
+
+    def task_add(self, key: str, content: str, group: str = None) -> bool:
+        """Add a task with status 'pending'."""
+        return self._put("task", "task", key, content, status="pending", group=group)
+
+    def task_update(self, key: str, status: str = None, content: str = None, group: str = None) -> bool:
+        """Update a task's status, content, or group. Returns True if changed."""
+        path = f"task:{key}"
+        cur = self.conn.execute('SELECT id, content, status, "group" FROM documents WHERE path = ? AND source_type = ?', (path, "task"))
+        existing = cur.fetchone()
+        if not existing:
+            return False
+
+        new_content = content if content is not None else existing["content"]
+        new_status = status if status is not None else existing["status"]
+        new_group = group if group is not None else existing["group"]
+
+        return self._put("task", "task", key, new_content, status=new_status, group=new_group)
+
+    def task_remove(self, key: str) -> bool:
+        """Remove a task by key."""
+        return self._remove("task", "task", key)
+
+    def task_list(self, status: str = None, group: str = None, query: str = None, limit: int = 50) -> List[dict]:
+        """List tasks, optionally filtered by status and/or group."""
+        return self._list_typed("task", query=query, status=status, group=group, limit=limit)
+
+    # --- Plans ---
+
+    def plan_create(self, key: str, content: str) -> bool:
+        """Create or update a plan with status 'active'."""
+        return self._put("plan", "plan", key, content, status="active")
+
+    def plan_get(self, key: str) -> Optional[dict]:
+        """Get a single plan by key."""
+        path = f"plan:{key}"
+        cur = self.conn.execute(
+            'SELECT id, path, content, indexed_at, status, "group" FROM documents WHERE path = ? AND source_type = ?',
+            (path, "plan"),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def plan_archive(self, key: str) -> bool:
+        """Archive a plan. Returns True if changed."""
+        path = f"plan:{key}"
+        cur = self.conn.execute(
+            "UPDATE documents SET status = 'archived', indexed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE path = ? AND source_type = ? AND status = 'active'",
+            (path, "plan"),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def plan_list(self, status: str = "active", query: str = None, limit: int = 20) -> List[dict]:
+        """List plans, defaulting to active only."""
+        return self._list_typed("plan", query=query, status=status, limit=limit)
 
     def close(self):
         self.conn.close()

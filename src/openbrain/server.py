@@ -120,6 +120,100 @@ def create_stdio_server() -> FastMCP:
         with _ensure_db() as db:
             return db.recall(query=query or None, limit=limit)
 
+    # --- Learnings ---
+
+    @mcp.tool()
+    def learn(key: str, content: str) -> dict:
+        """Store a learning — knowledge discovered during development (e.g. 'sqlite-alter-limits', 'fts5-trigger-pattern'). Content is what was learned."""
+        with _ensure_db() as db:
+            written = db.learn(key, content)
+        return {"key": key, "written": written}
+
+    @mcp.tool()
+    def recall_learnings(query: str = "", limit: int = 20) -> list[dict]:
+        """Retrieve learnings. If query is given, search by content. If empty, list all learnings."""
+        with _ensure_db() as db:
+            return db.recall_learnings(query=query or None, limit=limit)
+
+    @mcp.tool()
+    def forget_learning(key: str) -> dict:
+        """Remove a learning by key."""
+        with _ensure_db() as db:
+            deleted = db.forget_learning(key)
+        return {"key": key, "deleted": deleted}
+
+    # --- Tasks ---
+
+    @mcp.tool()
+    def task_add(key: str, content: str, group: str = "") -> dict:
+        """Add a task with status 'pending'. Key is a short identifier. Group is optional (e.g. 'v0.2', 'auth-feature')."""
+        with _ensure_db() as db:
+            written = db.task_add(key, content, group=group or None)
+        return {"key": key, "written": written}
+
+    @mcp.tool()
+    def task_update(key: str, status: str = "", content: str = "", group: str = "") -> dict:
+        """Update a task. Status can be 'pending', 'in_progress', or 'done'. Only provided fields are changed."""
+        with _ensure_db() as db:
+            updated = db.task_update(
+                key,
+                status=status or None,
+                content=content or None,
+                group=group or None,
+            )
+        return {"key": key, "updated": updated}
+
+    @mcp.tool()
+    def task_list(status: str = "", group: str = "", query: str = "", limit: int = 50) -> list[dict]:
+        """List tasks. Filter by status ('pending', 'in_progress', 'done') and/or group. Search by content with query."""
+        with _ensure_db() as db:
+            return db.task_list(
+                status=status or None,
+                group=group or None,
+                query=query or None,
+                limit=limit,
+            )
+
+    @mcp.tool()
+    def task_remove(key: str) -> dict:
+        """Remove a task by key."""
+        with _ensure_db() as db:
+            deleted = db.task_remove(key)
+        return {"key": key, "deleted": deleted}
+
+    # --- Plans ---
+
+    @mcp.tool()
+    def plan_create(key: str, content: str) -> dict:
+        """Create or update a plan. Content is markdown. Status starts as 'active'."""
+        with _ensure_db() as db:
+            written = db.plan_create(key, content)
+        return {"key": key, "written": written}
+
+    @mcp.tool()
+    def plan_get(key: str) -> dict:
+        """Get a single plan by key. Returns the full plan content."""
+        with _ensure_db() as db:
+            plan = db.plan_get(key)
+        return plan or {"error": f"No plan found with key '{key}'"}
+
+    @mcp.tool()
+    def plan_list(status: str = "active", query: str = "", limit: int = 20) -> list[dict]:
+        """List plans. Defaults to active plans. Set status to 'archived' or '' for all."""
+        with _ensure_db() as db:
+            return db.plan_list(
+                status=status or None,
+                query=query or None,
+                limit=limit,
+            )
+
+    @mcp.tool()
+    def plan_archive(key: str) -> dict:
+        """Archive a plan (mark as done). Archived plans are hidden from default plan_list."""
+        with _ensure_db() as db:
+            archived = db.plan_archive(key)
+        return {"key": key, "archived": archived}
+
     return mcp
 
 
