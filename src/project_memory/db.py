@@ -52,6 +52,8 @@ MIGRATIONS = [
     """),
     # Version 2 → 3: add created_at, updated_at, type columns.
     lambda conn: _migrate_v2_to_v3(conn),
+    # Version 3 → 4: add embedding tables (sqlite-vec + config).
+    lambda conn: _migrate_v3_to_v4(conn),
 ]
 
 
@@ -74,6 +76,30 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection):
             updated_at = COALESCE(indexed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         WHERE created_at IS NULL
     """)
+    conn.commit()
+
+
+def _migrate_v3_to_v4(conn: sqlite3.Connection):
+    """Add embedding tables: vec_documents (sqlite-vec) and embedding_config."""
+    # embedding_config stores active model settings
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS embedding_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            model TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            base_url TEXT NOT NULL
+        )
+    """)
+    # vec_documents: virtual table via sqlite-vec, keyed by document ID.
+    # We try to create it, but if sqlite-vec isn't loaded we skip gracefully.
+    try:
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_documents USING vec0(
+                embedding float[384]
+            )
+        """)
+    except Exception:
+        pass  # sqlite-vec not available; vector search will be disabled
     conn.commit()
 
 
@@ -149,7 +175,19 @@ class ProjectMemoryDB:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
+        self._load_vec_extension()
         self._run_migrations()
+
+    def _load_vec_extension(self):
+        """Load the sqlite-vec extension for vector search."""
+        try:
+            import sqlite_vec
+            self.conn.enable_load_extension(True)
+            sqlite_vec.load(self.conn)
+            self.conn.enable_load_extension(False)
+            self._has_vec = True
+        except (ImportError, Exception):
+            self._has_vec = False
 
     def __enter__(self):
         return self

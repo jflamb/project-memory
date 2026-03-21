@@ -87,11 +87,19 @@ def create_stdio_server() -> FastMCP:
         return index_repository(root=str(root))
 
     @mcp.tool()
-    def search(query: str, limit: int = 20) -> list[dict]:
-        """Search indexed repository content using full-text search with bm25 ranking."""
+    def search(query: str, limit: int = 20) -> dict:
+        """Search indexed repository content. Uses keyword search (FTS5 bm25). When embeddings are configured, hybrid search combines keyword + vector similarity."""
         root = _cwd_root()
         with ProjectMemoryDB(root=root) as db:
-            return db.search(query, limit=limit)
+            results = db.search(query, limit=limit)
+            search_mode = "keyword"
+            for r in results:
+                r["search_mode"] = search_mode
+        hint = None if search_mode == "hybrid" else "Configure embeddings with setup-embeddings for hybrid search."
+        response = {"results": results, "search_mode": search_mode}
+        if hint:
+            response["hint"] = hint
+        return response
 
     @mcp.tool()
     def list_documents() -> list[dict]:

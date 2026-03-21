@@ -479,3 +479,34 @@ def test_init_protocols_not_default(tmp_path, runner):
     if result.exit_code == 0 and result.output.strip().startswith("["):
         data = json.loads(result.output)
         assert len(data) == 0
+
+
+# --- embedding CLI commands ---
+
+
+def test_setup_embeddings_command_exists(runner):
+    result = runner.invoke(app, ["setup-embeddings", "--help"])
+    assert result.exit_code == 0
+    assert "embedding" in result.output.lower()
+
+
+def test_test_embeddings_command_exists(runner):
+    result = runner.invoke(app, ["test-embeddings", "--help"])
+    assert result.exit_code == 0
+
+
+def test_index_skip_embeddings_flag(initialized_repo, runner):
+    (initialized_repo / "app.py").write_text("code here")
+    result = runner.invoke(app, ["index", "--skip-embeddings", "--path", str(initialized_repo)])
+    assert result.exit_code == 0
+    assert "Indexed" in result.output
+
+
+def test_search_shows_search_mode(initialized_repo, runner):
+    """Search should show search_mode in JSON output."""
+    (initialized_repo / "doc.txt").write_text("findable content here")
+    runner.invoke(app, ["index", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["search", "findable", "--path", str(initialized_repo), "--format", "json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data[0]["search_mode"] == "keyword"

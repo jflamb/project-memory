@@ -81,7 +81,10 @@ def init(
 
 
 @app.command()
-def index(path: RepoPath = "."):
+def index(
+    skip_embeddings: bool = typer.Option(False, "--skip-embeddings", help="Skip embedding generation (keyword-only reindex)"),
+    path: RepoPath = ".",
+):
     """Index text files in the repository."""
     root = Path(path).resolve()
     if not (root / ".project-memory").exists():
@@ -411,6 +414,54 @@ def plan_archive_command(
         typer.echo(f"Archived plan '{key}'")
     else:
         typer.echo(f"No active plan found with key '{key}'", err=True)
+        raise typer.Exit(code=1)
+
+
+# --- Embedding commands ---
+
+
+@app.command("setup-embeddings")
+def setup_embeddings_command(
+    api_key: str = typer.Option("", "--api-key", "-k", help="API key for the embedding provider"),
+    base_url: str = typer.Option("https://api.openai.com/v1", "--base-url", help="Base URL for the embedding API"),
+    model: str = typer.Option("text-embedding-3-small", "--model", "-m", help="Embedding model name"),
+):
+    """Configure embedding provider for hybrid search."""
+    from .embeddings import EmbeddingConfig, save_embedding_config
+
+    if not api_key:
+        typer.echo("Error: --api-key is required", err=True)
+        raise typer.Exit(code=1)
+
+    config = EmbeddingConfig(api_key=api_key, base_url=base_url, model=model)
+    path = save_embedding_config(config)
+    typer.echo(f"Embedding config saved to {path}")
+    typer.echo(f"  Model: {model}")
+    typer.echo(f"  Base URL: {base_url}")
+
+
+@app.command("test-embeddings")
+def test_embeddings_command():
+    """Test the embedding configuration by embedding a sample sentence."""
+    from .embeddings import load_embedding_config
+
+    config = load_embedding_config()
+    if not config:
+        typer.echo("Error: No embedding configuration found. Run 'project-memory setup-embeddings' first.", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Config loaded: model={config.model}, base_url={config.base_url}")
+    typer.echo("Embedding test sentence...")
+
+    import asyncio
+    from .embeddings import embed_texts
+
+    try:
+        vectors = asyncio.run(embed_texts(config, ["This is a test sentence."]))
+        dims = len(vectors[0])
+        typer.echo(f"Success! Dimensions: {dims}")
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
 
