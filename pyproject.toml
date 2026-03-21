@@ -1,0 +1,32 @@
+[project]
+name = "openbrain"
+version = "0.1.0"
+description = "OpenBrain: repo-scoped memory engine for AI agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [ {name = "Your Name", email = "your.email@example.com"} ]
+keywords = ["AI", "memory", "sqlite", "semantic search", "mcp"]
+dependencies = [
+  "mcp>=1.12.4",
+  "starlette>=0.52.0",
+  "typer>=0.10.0",
+  "uvicorn[standard]>=0.23.0",
+  "pydantic>=2.0.0"
+]
+[project.urls]
+Homepage = "https://github.com/your/repo"
+Repository = "https://github.com/your/repo"
+
+[project.scripts]
+openbrain = "openbrain.cli:app"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-anyio>=0.0.0", "httpx>=0.24"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling>=1.13.0"]
+build-backend = "hatchling.build"
