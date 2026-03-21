@@ -1,0 +1,231 @@
+# Instincts generated from https://github.com/jflamb/project-memory
+# Generated: 2026-03-21T23:22:28.231Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: project-memory-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Commit Length
+
+## Action
+
+Write moderate-length commit messages (~60 characters)
+
+## Evidence
+
+- Average commit message length: 60 chars
+- Based on 14 commits
+
+---
+id: project-memory-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: project-memory-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: project-memory-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: project-memory-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: project-memory-workflow-feature-development
+trigger: "when implementing a new feature"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Workflow Feature Development
+
+## Action
+
+Follow the feature-development workflow:
+1. Add feature implementation
+2. Add tests for feature
+3. Update documentation
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~21x per month
+- Files: **/*.test.*
+
+---
+id: project-memory-workflow-add-or-evolve-database-schema-and-memory-types
+trigger: "when doing add or evolve database schema and memory types"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Workflow Add Or Evolve Database Schema And Memory Types
+
+## Action
+
+Follow the add-or-evolve-database-schema-and-memory-types workflow:
+1. Update database logic (db.py) to add new columns or tables and migration logic.
+2. Update CLI interface (cli.py) to expose new commands/options for the new memory types or schema fields.
+3. Update server logic (server.py) to support new types/fields in MCP tools.
+4. Update or add tests for CLI, DB, and server (test_cli.py, test_db.py, test_server.py).
+5. Update documentation (AGENT_GUIDE.md) if new types or conventions are introduced.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: src/project_memory/db.py, src/project_memory/cli.py, src/project_memory/server.py
+
+---
+id: project-memory-workflow-add-new-feature-with-cli-server-and-tests
+trigger: "when doing add new feature with cli server and tests"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Workflow Add New Feature With Cli Server And Tests
+
+## Action
+
+Follow the add-new-feature-with-cli-server-and-tests workflow:
+1. Create or update a new module for the feature (e.g., embeddings.py, portability.py, protocols.py, index.py).
+2. Update CLI (cli.py) to add new commands or options for the feature.
+3. Update server (server.py) to expose new tools or endpoints.
+4. Add or update tests for CLI and the new module (test_cli.py, test_<feature>.py, test_server.py).
+5. Update dependencies if needed (pyproject.toml).
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: src/project_memory/cli.py, src/project_memory/server.py, src/project_memory/embeddings.py
+
+---
+id: project-memory-workflow-rename-or-rebrand-project
+trigger: "when doing rename or rebrand project"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Workflow Rename Or Rebrand Project
+
+## Action
+
+Follow the rename-or-rebrand-project workflow:
+1. Rename source directories and update import paths.
+2. Update all references in CLI, DB, server, and test files.
+3. Update documentation and config files to reflect the new name.
+4. Update package metadata (pyproject.toml).
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: src/openbrain/*, src/project_memory/*, tests/test_cli.py
+
+---
+id: project-memory-workflow-add-or-update-ci-cd-workflows
+trigger: "when doing add or update ci cd workflows"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/jflamb/project-memory
+---
+
+# Project Memory Workflow Add Or Update Ci Cd Workflows
+
+## Action
+
+Follow the add-or-update-ci-cd-workflows workflow:
+1. Create or update workflow YAML files in .github/workflows.
+2. Update package metadata (pyproject.toml) as needed.
+3. Test workflow triggers and results.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: .github/workflows/ci.yml, .github/workflows/publish.yml, .github/workflows/release.yml
+
