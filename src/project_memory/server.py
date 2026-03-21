@@ -20,8 +20,31 @@ def _resolve_root(root: str | None) -> Path:
 
 
 def _cwd_root() -> Path:
-    """Resolve repo root from current working directory."""
-    return Path(os.getcwd()).resolve()
+    """Resolve repo root from current working directory.
+
+    Walks up from cwd looking for an existing ``.project-memory/`` directory
+    (preferred) or ``.git`` marker.  Falls back to cwd if neither is found.
+    """
+    cwd = Path(os.getcwd()).resolve()
+    # First pass: look for an existing .project-memory directory
+    cur = cwd
+    while True:
+        if (cur / ".project-memory").is_dir():
+            return cur
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    # Second pass: fall back to .git root
+    cur = cwd
+    while True:
+        if (cur / ".git").exists():
+            return cur
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    return cwd
 
 
 def _build_protocol_reminder(db: ProjectMemoryDB) -> Optional[str]:

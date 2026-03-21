@@ -6,7 +6,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from project_memory.server import create_app, create_stdio_server
+from project_memory.server import create_app, create_stdio_server, _cwd_root
 
 
 @pytest.fixture
@@ -201,3 +201,48 @@ def test_protocol_reminder_absent_when_no_protocols(tmp_path):
     with ProjectMemoryDB(root=tmp_path) as db:
         reminder = _build_protocol_reminder(db)
         assert reminder is None
+
+
+# --- _cwd_root resolution ---
+
+
+def test_cwd_root_finds_project_memory_dir(tmp_path, monkeypatch):
+    """_cwd_root should find the ancestor with .project-memory/."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".project-memory").mkdir()
+    subdir = repo / "a" / "b"
+    subdir.mkdir(parents=True)
+    monkeypatch.chdir(subdir)
+    assert _cwd_root() == repo
+
+
+def test_cwd_root_falls_back_to_git(tmp_path, monkeypatch):
+    """_cwd_root should fall back to .git root when no .project-memory/ exists."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    subdir = repo / "src" / "pkg"
+    subdir.mkdir(parents=True)
+    monkeypatch.chdir(subdir)
+    assert _cwd_root() == repo
+
+
+def test_cwd_root_prefers_project_memory_over_git(tmp_path, monkeypatch):
+    """.project-memory/ should win over .git when both exist at different levels."""
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    (outer / ".git").mkdir()
+    inner = outer / "inner"
+    inner.mkdir()
+    (inner / ".project-memory").mkdir()
+    subdir = inner / "deep"
+    subdir.mkdir()
+    monkeypatch.chdir(subdir)
+    assert _cwd_root() == inner
+
+
+def test_cwd_root_falls_back_to_cwd(tmp_path, monkeypatch):
+    """Without markers, _cwd_root should return cwd."""
+    monkeypatch.chdir(tmp_path)
+    assert _cwd_root() == tmp_path
