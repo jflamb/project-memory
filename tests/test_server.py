@@ -5,7 +5,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from openbrain.server import create_app
+from project_memory.server import create_app
 
 
 @pytest.fixture

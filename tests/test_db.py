@@ -2,12 +2,12 @@ import sqlite3
 
 import pytest
 
-from openbrain.db import OpenBrainDB, content_hash, normalize_fts_query
+from project_memory.db import ProjectMemoryDB, content_hash, normalize_fts_query
 
 
 @pytest.fixture
 def db(tmp_path):
-    with OpenBrainDB(root=tmp_path) as db:
+    with ProjectMemoryDB(root=tmp_path) as db:
         yield db
 
 
@@ -15,7 +15,7 @@ def db(tmp_path):
 
 
 def test_context_manager_closes_connection(tmp_path):
-    with OpenBrainDB(root=tmp_path) as db:
+    with ProjectMemoryDB(root=tmp_path) as db:
         conn = db.conn
     # Connection should be closed after exiting context
     with pytest.raises(Exception):
@@ -136,9 +136,9 @@ def test_wal_mode_enabled(db):
 
 def test_migrate_from_v0_schema(tmp_path):
     """Simulate a v0 database and verify migration adds columns and triggers."""
-    db_dir = tmp_path / ".openbrain"
+    db_dir = tmp_path / ".project-memory"
     db_dir.mkdir()
-    db_path = db_dir / "openbrain.db"
+    db_path = db_dir / "project_memory.db"
 
     # Create a v0 schema manually
     conn = sqlite3.connect(db_path)
@@ -160,7 +160,7 @@ def test_migrate_from_v0_schema(tmp_path):
     conn.close()
 
     # Open with new code — should trigger migration
-    with OpenBrainDB(root=tmp_path) as db:
+    with ProjectMemoryDB(root=tmp_path) as db:
         # New columns should exist
         row = db.conn.execute("SELECT source_type, content_hash FROM documents WHERE path = 'old.txt'").fetchone()
         assert row["source_type"] == "file"
@@ -405,9 +405,9 @@ def test_plan_search(db):
 
 def test_migrate_v1_to_v2(tmp_path):
     """Simulate a v1 database and verify migration adds status and group columns."""
-    db_dir = tmp_path / ".openbrain"
+    db_dir = tmp_path / ".project-memory"
     db_dir.mkdir()
-    db_path = db_dir / "openbrain.db"
+    db_path = db_dir / "project_memory.db"
 
     conn = sqlite3.connect(db_path)
     # Create v1 schema (no status/group columns)
@@ -437,7 +437,7 @@ def test_migrate_v1_to_v2(tmp_path):
     conn.commit()
     conn.close()
 
-    with OpenBrainDB(root=tmp_path) as db:
+    with ProjectMemoryDB(root=tmp_path) as db:
         # Existing note should still work
         notes = db.recall()
         assert len(notes) == 1

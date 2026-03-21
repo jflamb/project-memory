@@ -194,7 +194,7 @@ def _run_migrations(self):
     self.conn.commit()
 ```
 
-Call `_run_migrations()` in `__init__` after opening the connection. Each migration runs once. The version number is stored in the database file itself, so it travels with the `.openbrain/` directory.
+Call `_run_migrations()` in `__init__` after opening the connection. Each migration runs once. The version number is stored in the database file itself, so it travels with the `.project-memory/` directory.
 
 ## WAL Mode
 
@@ -217,7 +217,7 @@ WAL mode persists — you only need to set it once, but setting it on every conn
 Wrap the database class as a context manager to prevent connection leaks:
 
 ```python
-class OpenBrainDB:
+class ProjectMemoryDB:
     def __enter__(self):
         return self
 
@@ -229,12 +229,12 @@ class OpenBrainDB:
 Usage:
 
 ```python
-with OpenBrainDB(root=path) as db:
+with ProjectMemoryDB(root=path) as db:
     results = db.search("query")
 # connection is closed even if search() raises
 ```
 
-This replaces the manual `db = OpenBrainDB(); ...; db.close()` pattern, which leaks the connection if anything between open and close raises an exception.
+This replaces the manual `db = ProjectMemoryDB(); ...; db.close()` pattern, which leaks the connection if anything between open and close raises an exception.
 
 ### Row factory
 

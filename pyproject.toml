@@ -1,7 +1,7 @@
 [project]
 name = "project-memory"
 version = "0.1.0"
-description = "OpenBrain: repo-scoped memory engine for AI agents"
+description = "Project Memory: repo-scoped memory engine for AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -19,13 +19,16 @@ Homepage = "https://github.com/jflamb/project-memory"
 Repository = "https://github.com/jflamb/project-memory"
 
 [project.scripts]
-openbrain = "openbrain.cli:app"
+project-memory = "project_memory.cli:app"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-anyio>=0.0.0", "httpx>=0.24"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/project_memory"]
 
 [build-system]
 requires = ["hatchling>=1.13.0"]

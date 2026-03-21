@@ -3,7 +3,7 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from openbrain.cli import app
+from project_memory.cli import app
 
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def runner():
 
 @pytest.fixture
 def initialized_repo(tmp_path, runner):
-    """A tmp_path with an initialized OpenBrain database."""
+    """A tmp_path with an initialized ProjectMemory database."""
     result = runner.invoke(app, ["init", "--path", str(tmp_path)])
     assert result.exit_code == 0
     return tmp_path
@@ -25,7 +25,7 @@ def initialized_repo(tmp_path, runner):
 def test_init_creates_db(tmp_path, runner):
     result = runner.invoke(app, ["init", "--path", str(tmp_path)])
     assert result.exit_code == 0
-    assert (tmp_path / ".openbrain" / "openbrain.db").exists()
+    assert (tmp_path / ".project-memory" / "project_memory.db").exists()
 
 
 def test_init_idempotent(tmp_path, runner):
@@ -90,7 +90,7 @@ def test_reindex_removes_deleted_documents(initialized_repo, runner):
 def test_index_requires_init(tmp_path, runner):
     result = runner.invoke(app, ["index", "--path", str(tmp_path)])
     assert result.exit_code == 1
-    assert "Run 'openbrain init' first" in result.output
+    assert "Run 'project-memory init' first" in result.output
 
 
 # --- search ---
@@ -103,9 +103,9 @@ def test_search_command_name(runner):
 
 
 def test_search_finds_document(initialized_repo, runner):
-    (initialized_repo / "dummy.txt").write_text("hello openbrain world")
+    (initialized_repo / "dummy.txt").write_text("hello project memory world")
     runner.invoke(app, ["index", "--path", str(initialized_repo)])
-    result = runner.invoke(app, ["search", "openbrain", "--path", str(initialized_repo)])
+    result = runner.invoke(app, ["search", "memory", "--path", str(initialized_repo)])
     assert result.exit_code == 0
     assert "dummy.txt" in result.output
 
@@ -127,7 +127,7 @@ def test_search_handles_free_text_punctuation(initialized_repo, runner):
 def test_search_requires_init(tmp_path, runner):
     result = runner.invoke(app, ["search", "anything", "--path", str(tmp_path)])
     assert result.exit_code == 1
-    assert "Run 'openbrain init' first" in result.output
+    assert "Run 'project-memory init' first" in result.output
 
 
 # --- output formats ---

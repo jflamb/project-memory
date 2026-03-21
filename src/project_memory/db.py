@@ -5,8 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable, List, Optional
 
-DEFAULT_DIR = ".openbrain"
-DEFAULT_DB = "openbrain.db"
+DEFAULT_DIR = ".project-memory"
+DEFAULT_DB = "project_memory.db"
 
 # Each migration takes a connection and applies one schema version bump.
 MIGRATIONS = [
@@ -112,7 +112,7 @@ def content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-class OpenBrainDB:
+class ProjectMemoryDB:
     def __init__(self, root: Optional[str] = None):
         self.root = Path(root or os.getcwd())
         self.db_dir = self.root / DEFAULT_DIR

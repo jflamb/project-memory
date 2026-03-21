@@ -2,7 +2,7 @@
 
 ## Memory
 
-This project provides `openbrain`, a repo-scoped memory engine backed by SQLite + FTS5. Use the MCP tools instead of creating markdown files for persistent memory, tasks, plans, or learnings.
+This project provides `project-memory`, a repo-scoped memory engine backed by SQLite + FTS5. Use the MCP tools instead of creating markdown files for persistent memory, tasks, plans, or learnings.
 
 ### Available MCP tools
 
@@ -62,13 +62,13 @@ Task statuses: `pending`, `in_progress`, `done`. Groups are freeform strings (e.
 ### What not to do
 
 - Do not create markdown files for memory, notes, plans, or task lists — use the database
-- Do not manually manage `.openbrain/` — it auto-initializes on first tool use
+- Do not manually manage `.project-memory/` — it auto-initializes on first tool use
 - Do not drop planning documents into `docs/plans/` — use `plan_create` instead
 
 ## Project structure
 
 ```
-src/openbrain/
+src/project_memory/
   db.py       — SQLite + FTS5 database layer (migrations, triggers, bm25)
   index.py    — File discovery and content ingestion
   search.py   — Search wrapper
@@ -83,6 +83,6 @@ tests/
 ## Development rules
 
 - Run `pytest` after every change — don't batch changes then test at the end
-- Use context managers (`with OpenBrainDB() as db:`) for all database access
+- Use context managers (`with ProjectMemoryDB() as db:`) for all database access
 - FTS5 sync is handled by triggers — never manually insert into `documents_fts`
 - Keep it simple — this is a CLI tool, not a framework

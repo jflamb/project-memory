@@ -7,7 +7,7 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
-from .db import OpenBrainDB
+from .db import ProjectMemoryDB
 from .index import index_repo as index_repository
 from .search import search as search_repository
 
@@ -24,7 +24,7 @@ def _cwd_root() -> Path:
 def create_mcp_server(root: str | None = None) -> FastMCP:
     repo_root = _resolve_root(root)
     mcp = FastMCP(
-        "OpenBrain",
+        "Project Memory",
         instructions="Repo-scoped memory for code indexing and search.",
         json_response=True,
         stateless_http=True,
@@ -34,7 +34,7 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
     @mcp.tool()
     def init() -> dict:
         """Initialize the repo-scoped SQLite memory store."""
-        with OpenBrainDB(root=repo_root) as db:
+        with ProjectMemoryDB(root=repo_root) as db:
             return {"status": "initialized", "db_path": str(db.db_path)}
 
     @mcp.tool()
@@ -50,7 +50,7 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
     @mcp.tool()
     def list_documents() -> list[dict]:
         """List indexed documents by relative path."""
-        with OpenBrainDB(root=repo_root) as db:
+        with ProjectMemoryDB(root=repo_root) as db:
             return db.list_documents()
 
     return mcp
@@ -59,14 +59,14 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
 def create_stdio_server() -> FastMCP:
     """Create an MCP server for stdio transport. Resolves repo root from cwd on each call."""
     mcp = FastMCP(
-        "OpenBrain",
+        "Project Memory",
         instructions="Repo-scoped memory for code indexing and search. Operates on the current working directory.",
         json_response=True,
     )
 
-    def _ensure_db() -> OpenBrainDB:
+    def _ensure_db() -> ProjectMemoryDB:
         """Auto-init and return a database for cwd."""
-        return OpenBrainDB(root=_cwd_root())
+        return ProjectMemoryDB(root=_cwd_root())
 
     @mcp.tool()
     def index() -> dict:
@@ -78,7 +78,7 @@ def create_stdio_server() -> FastMCP:
     def search(query: str, limit: int = 20) -> list[dict]:
         """Search indexed repository content using full-text search with bm25 ranking."""
         root = _cwd_root()
-        with OpenBrainDB(root=root) as db:
+        with ProjectMemoryDB(root=root) as db:
             return db.search(query, limit=limit)
 
     @mcp.tool()
@@ -91,7 +91,7 @@ def create_stdio_server() -> FastMCP:
     def stats() -> dict:
         """Show database statistics: document count and database size."""
         root = _cwd_root()
-        db_path = root / ".openbrain" / "openbrain.db"
+        db_path = root / ".project-memory" / "project_memory.db"
         with _ensure_db() as db:
             count = db.document_count()
         if db_path.exists():

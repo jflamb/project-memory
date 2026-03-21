@@ -6,12 +6,12 @@ from typing import Annotated, Optional
 
 import typer
 
-from .db import OpenBrainDB
+from .db import ProjectMemoryDB
 from .index import index_repo
 from .search import search as search_docs
 from .server import create_app, create_stdio_server
 
-app = typer.Typer(help="OpenBrain — repo-scoped memory engine for AI agents")
+app = typer.Typer(help="Project Memory — repo-scoped memory engine for AI agents")
 task_app = typer.Typer(help="Manage tasks")
 plan_app = typer.Typer(help="Manage plans")
 app.add_typer(task_app, name="task")
@@ -54,11 +54,11 @@ def _format_list(results: list[dict], prefix: str, output_format: OutputFormat, 
 
 @app.command()
 def init(path: RepoPath = "."):
-    """Initialize OpenBrain repo memory."""
+    """Initialize project memory database."""
     try:
         root = Path(path).resolve()
-        with OpenBrainDB(root=root) as db:
-            typer.echo(f"Initialized OpenBrain database at {db.db_path}")
+        with ProjectMemoryDB(root=root) as db:
+            typer.echo(f"Initialized project memory database at {db.db_path}")
     except PermissionError:
         typer.echo("Error: No write permission for this directory", err=True)
         raise typer.Exit(code=1)
@@ -68,8 +68,8 @@ def init(path: RepoPath = "."):
 def index(path: RepoPath = "."):
     """Index text files in the repository."""
     root = Path(path).resolve()
-    if not (root / ".openbrain").exists():
-        typer.echo("Error: No OpenBrain database found. Run 'openbrain init' first.", err=True)
+    if not (root / ".project-memory").exists():
+        typer.echo("Error: No project memory database found. Run 'project-memory init' first.", err=True)
         raise typer.Exit(code=1)
     result = index_repo(root=str(root))
     typer.echo(f"Indexed {result['total']} documents ({result['skipped']} unchanged, {result['deleted']} removed)")
@@ -84,8 +84,8 @@ def search_command(
 ):
     """Search indexed repository content."""
     root = Path(path).resolve()
-    if not (root / ".openbrain").exists():
-        typer.echo("Error: No OpenBrain database found. Run 'openbrain init' first.", err=True)
+    if not (root / ".project-memory").exists():
+        typer.echo("Error: No project memory database found. Run 'project-memory init' first.", err=True)
         raise typer.Exit(code=1)
 
     results = search_docs(query=query, root=str(root), limit=limit)
@@ -109,12 +109,12 @@ def search_command(
 def stats(path: RepoPath = "."):
     """Show database statistics."""
     root = Path(path).resolve()
-    db_path = root / ".openbrain" / "openbrain.db"
+    db_path = root / ".project-memory" / "project_memory.db"
     if not db_path.exists():
-        typer.echo("Error: No OpenBrain database found. Run 'openbrain init' first.", err=True)
+        typer.echo("Error: No project memory database found. Run 'project-memory init' first.", err=True)
         raise typer.Exit(code=1)
 
-    with OpenBrainDB(root=root) as db:
+    with ProjectMemoryDB(root=root) as db:
         count = db.document_count()
     size_bytes = db_path.stat().st_size
     if size_bytes < 1024:
@@ -137,7 +137,7 @@ def remember(
     path: RepoPath = ".",
 ):
     """Store a note in project memory."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         written = db.remember(key, content)
     if written:
         typer.echo(f"Remembered '{key}'")
@@ -151,7 +151,7 @@ def forget(
     path: RepoPath = ".",
 ):
     """Remove a note from project memory."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         deleted = db.forget(key)
     if deleted:
         typer.echo(f"Forgot '{key}'")
@@ -168,7 +168,7 @@ def recall(
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
 ):
     """Retrieve notes from project memory."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         results = db.recall(query=query or None, limit=limit)
     _format_list(results, "note", output_format, "No notes found")
 
@@ -183,7 +183,7 @@ def learn(
     path: RepoPath = ".",
 ):
     """Store a learning — knowledge discovered during development."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         written = db.learn(key, content)
     if written:
         typer.echo(f"Learned '{key}'")
@@ -199,7 +199,7 @@ def recall_learnings_command(
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
 ):
     """Retrieve learnings from project memory."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         results = db.recall_learnings(query=query or None, limit=limit)
     _format_list(results, "learning", output_format, "No learnings found")
 
@@ -210,7 +210,7 @@ def forget_learning_command(
     path: RepoPath = ".",
 ):
     """Remove a learning from project memory."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         deleted = db.forget_learning(key)
     if deleted:
         typer.echo(f"Forgot learning '{key}'")
@@ -230,7 +230,7 @@ def task_add_command(
     path: RepoPath = ".",
 ):
     """Add a task."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         db.task_add(key, content, group=group or None)
     typer.echo(f"Added task '{key}'" + (f" [{group}]" if group else ""))
 
@@ -245,7 +245,7 @@ def task_list_command(
     limit: int = typer.Option(50, "--limit", "-n", help="Max results"),
 ):
     """List tasks."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         results = db.task_list(status=status or None, group=group or None, query=query or None, limit=limit)
     _format_list(results, "task", output_format, "No tasks found")
 
@@ -259,7 +259,7 @@ def task_update_command(
     path: RepoPath = ".",
 ):
     """Update a task's status, content, or group."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         updated = db.task_update(key, status=status or None, content=content or None, group=group or None)
     if updated:
         typer.echo(f"Updated task '{key}'")
@@ -274,7 +274,7 @@ def task_remove_command(
     path: RepoPath = ".",
 ):
     """Remove a task."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         deleted = db.task_remove(key)
     if deleted:
         typer.echo(f"Removed task '{key}'")
@@ -293,7 +293,7 @@ def plan_create_command(
     path: RepoPath = ".",
 ):
     """Create or update a plan."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         db.plan_create(key, content)
     typer.echo(f"Created plan '{key}'")
 
@@ -305,7 +305,7 @@ def plan_get_command(
     output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
 ):
     """Get a plan by key."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         plan = db.plan_get(key)
     if not plan:
         typer.echo(f"No plan found with key '{key}'", err=True)
@@ -327,7 +327,7 @@ def plan_list_command(
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
 ):
     """List plans."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         results = db.plan_list(status=status or None, query=query or None, limit=limit)
     _format_list(results, "plan", output_format, "No plans found")
 
@@ -338,7 +338,7 @@ def plan_archive_command(
     path: RepoPath = ".",
 ):
     """Archive a plan."""
-    with OpenBrainDB(root=Path(path).resolve()) as db:
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
         archived = db.plan_archive(key)
     if archived:
         typer.echo(f"Archived plan '{key}'")

@@ -3,14 +3,14 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-from .db import OpenBrainDB
+from .db import ProjectMemoryDB
 
 TEXT_EXTENSIONS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".ini"}
 EXCLUDED_DIRS = {
     ".git",
     ".hg",
     ".svn",
-    ".openbrain",
+    ".project_memory",
     ".venv",
     "venv",
     "node_modules",
@@ -40,7 +40,7 @@ def index_repo(root: str = None) -> dict:
     skipped = 0
     indexed_paths: list[str] = []
 
-    with OpenBrainDB(root=root_path) as db:
+    with ProjectMemoryDB(root=root_path) as db:
         for file_path in _iter_text_files(root_path):
             relative_path = str(file_path.relative_to(root_path))
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:

@@ -1,8 +1,8 @@
-# OpenBrain — Repo-Scoped Memory Engine
+# Project Memory — Repo-Scoped Memory Engine
 
-This project is a minimal implementation of the OpenBrain spec, including:
-- CLI (`openbrain`) via Typer
-- SQLite memory database under `.openbrain/`
+This project is a minimal implementation of a repo-scoped memory engine, including:
+- CLI (`project-memory`) via Typer
+- SQLite memory database under `.project-memory/`
 - Ingestion and search modules
 - MCP HTTP server over streamable HTTP
 - GitHub Actions CI/release/publish workflows
@@ -11,21 +11,21 @@ This project is a minimal implementation of the OpenBrain spec, including:
 
 ```bash
 python -m pip install -e .
-openbrain init
-openbrain index
-openbrain search "your query"
-openbrain serve-mcp
+project-memory init
+project-memory index
+project-memory search "your query"
+project-memory serve-mcp
 ```
 
 ## Commands
 
-- `openbrain init` - initialize `.openbrain/openbrain.db`
-- `openbrain index` - ingest repository text files into SQLite
-- `openbrain search QUERY` - perform a keyword search
-- `openbrain serve-mcp` - run the MCP server at `http://127.0.0.1:8000/mcp/`
+- `project-memory init` - initialize `.project-memory/project_memory.db`
+- `project-memory index` - ingest repository text files into SQLite
+- `project-memory search QUERY` - perform a keyword search
+- `project-memory serve-mcp` - run the MCP server at `http://127.0.0.1:8000/mcp/`
 
 ## Project structure
 
-- `src/openbrain/` core implementation
-- `.openbrain/` runtime storage
+- `src/project_memory/` core implementation
+- `.project-memory/` runtime storage
 - `.github/workflows` CI/CD

@@ -15,7 +15,7 @@ For a small CLI (under ~8 commands), a flat `typer.Typer()` with `@app.command()
 
 ```python
 # flat — good for small CLIs
-app = typer.Typer(help="OpenBrain CLI")
+app = typer.Typer(help="Project Memory CLI")
 
 @app.command()
 def init(): ...
@@ -26,7 +26,7 @@ def search(query: str): ...
 
 ```python
 # grouped — when you have distinct command families
-app = typer.Typer(help="OpenBrain CLI")
+app = typer.Typer(help="Project Memory CLI")
 db_app = typer.Typer(help="Database management")
 app.add_typer(db_app, name="db")
 
@@ -51,7 +51,7 @@ Don't group prematurely — a flat list of 5 commands is easier to discover than
 - **Arguments** (`typer.Argument`): The primary input — what the command acts on. A search query, a file path, a name. Positional and required by default.
 - **Options** (`typer.Option`): Configuration that modifies behavior. Output format, verbosity, limits, paths to resources. Named with `--flag` syntax.
 
-The distinction matters for usability: `openbrain search "my query"` reads naturally because the query is the argument. `openbrain search --query "my query"` is clunky.
+The distinction matters for usability: `project-memory search "my query"` reads naturally because the query is the argument. `project-memory search --query "my query"` is clunky.
 
 ### Shared options
 
@@ -60,7 +60,7 @@ When multiple commands share the same option (like `--path` for the repo root), 
 ```python
 from typing import Annotated
 
-RepoPath = Annotated[str, typer.Option("--path", "-p", help="Repository root", envvar="OPENBRAIN_ROOT")]
+RepoPath = Annotated[str, typer.Option("--path", "-p", help="Repository root", envvar="PROJECT_MEMORY_ROOT")]
 
 @app.command()
 def index(path: RepoPath = "."):
@@ -71,7 +71,7 @@ def search_cmd(query: str, path: RepoPath = "."):
     ...
 ```
 
-This keeps help text consistent and lets users set `OPENBRAIN_ROOT` once instead of passing `--path` every time.
+This keeps help text consistent and lets users set `PROJECT_MEMORY_ROOT` once instead of passing `--path` every time.
 
 ### Defaults and environment variables
 
@@ -115,7 +115,7 @@ The key principle: **internal functions return structured data (dicts/lists), an
 - **Progress/diagnostics** → stderr (`typer.echo(..., err=True)`)
 - **Errors** → stderr with non-zero exit code
 
-This lets users pipe results (`openbrain search "query" | jq .`) while still seeing progress messages.
+This lets users pipe results (`project-memory search "query" | jq .`) while still seeing progress messages.
 
 ## Error Handling
 
@@ -147,7 +147,7 @@ Catch expected exceptions and translate them into helpful messages. Don't let ra
 @app.command()
 def init():
     try:
-        db = OpenBrainDB(root=root)
+        db = ProjectMemoryDB(root=root)
         db.close()
         typer.echo(f"Initialized database at {db.db_path}")
     except PermissionError:
@@ -159,12 +159,12 @@ Let unexpected exceptions propagate — they indicate bugs that should be visibl
 
 ### Callbacks for shared setup
 
-If multiple commands need the same validation (e.g., checking that `.openbrain/` exists), use a Typer callback instead of repeating the check:
+If multiple commands need the same validation (e.g., checking that `.project-memory/` exists), use a Typer callback instead of repeating the check:
 
 ```python
 @app.callback()
 def main(ctx: typer.Context):
-    """OpenBrain CLI — repo-scoped memory engine."""
+    """Project Memory CLI — repo-scoped memory engine."""
     # Shared setup that runs before any command
     pass
 ```
@@ -177,14 +177,14 @@ This is the most important section. Good CLI tests catch real bugs — bad ones 
 
 ```python
 from typer.testing import CliRunner
-from openbrain.cli import app
+from project_memory.cli import app
 
 runner = CliRunner()
 
 def test_init_creates_db(tmp_path):
     result = runner.invoke(app, ["init", "--path", str(tmp_path)])
     assert result.exit_code == 0
-    assert (tmp_path / ".openbrain" / "openbrain.db").exists()
+    assert (tmp_path / ".project-memory" / "project_memory.db").exists()
 
 def test_search_no_results(tmp_path):
     runner.invoke(app, ["init", "--path", str(tmp_path)])
@@ -217,7 +217,7 @@ def runner():
 
 @pytest.fixture
 def initialized_repo(tmp_path):
-    """A tmp_path with an initialized OpenBrain database."""
+    """A tmp_path with an initialized project memory database."""
     runner = CliRunner()
     runner.invoke(app, ["init", "--path", str(tmp_path)])
     return tmp_path
@@ -227,7 +227,7 @@ def initialized_repo(tmp_path):
 
 Good help text is documentation that lives where users actually look.
 
-- **Command docstring** → shown in `openbrain --help` and `openbrain <command> --help`
+- **Command docstring** → shown in `project-memory --help` and `project-memory <command> --help`
 - **`help=` on options/arguments** → shown next to each flag in help output
 - Keep docstrings to one line for the summary, add detail in the extended help if needed
 - Use `rich_help_panel` to visually group related options when a command has many flags
