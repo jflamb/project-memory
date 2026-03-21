@@ -75,9 +75,29 @@ def init(
             if protocols:
                 keys = generate_default_protocols(db, root)
                 typer.echo(f"Generated {len(keys)} protocol(s): {', '.join(keys)}")
+        # Add .project-memory/ to .gitignore if this is a git repo
+        _ensure_gitignore(root)
     except PermissionError:
         typer.echo("Error: No write permission for this directory", err=True)
         raise typer.Exit(code=1)
+
+
+def _ensure_gitignore(root: Path):
+    """Add .project-memory/ to .gitignore if it's a git repo and not already listed."""
+    if not (root / ".git").exists():
+        return
+    gitignore = root / ".gitignore"
+    entry = ".project-memory/"
+    if gitignore.exists():
+        content = gitignore.read_text(encoding="utf-8")
+        if entry in content:
+            return
+        if not content.endswith("\n"):
+            content += "\n"
+        content += f"{entry}\n"
+        gitignore.write_text(content, encoding="utf-8")
+    else:
+        gitignore.write_text(f"{entry}\n", encoding="utf-8")
 
 
 @app.command()
@@ -463,6 +483,48 @@ def test_embeddings_command():
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
+
+
+# --- MCP config helper ---
+
+
+@app.command("mcp-config")
+def mcp_config_command(
+    format: str = typer.Option("claude-code", "--format", "-f", help="Config format: claude-code, claude-desktop, cursor"),
+):
+    """Print the MCP server configuration snippet for your editor/tool."""
+    import shutil
+    import sys
+
+    # Find the project-memory executable
+    exe = shutil.which("project-memory") or sys.executable
+
+    if format == "claude-code":
+        config = {
+            "project-memory": {
+                "command": "uvx",
+                "args": ["project-memory", "serve-stdio"],
+            }
+        }
+    elif format == "claude-desktop":
+        config = {
+            "project-memory": {
+                "command": "uvx",
+                "args": ["project-memory", "serve-stdio"],
+            }
+        }
+    elif format == "cursor":
+        config = {
+            "project-memory": {
+                "command": "uvx",
+                "args": ["project-memory", "serve-stdio"],
+            }
+        }
+    else:
+        typer.echo(f"Unknown format: {format}. Use claude-code, claude-desktop, or cursor.", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(json.dumps(config, indent=2))
 
 
 # --- Server commands ---

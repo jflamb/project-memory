@@ -510,3 +510,80 @@ def test_search_shows_search_mode(initialized_repo, runner):
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data[0]["search_mode"] == "keyword"
+
+
+# --- mcp-config command ---
+
+
+def test_mcp_config_command_exists(runner):
+    result = runner.invoke(app, ["mcp-config", "--help"])
+    assert result.exit_code == 0
+
+
+def test_mcp_config_claude_code(runner):
+    result = runner.invoke(app, ["mcp-config", "--format", "claude-code"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "project-memory" in data
+    assert "command" in data["project-memory"]
+
+
+def test_mcp_config_claude_desktop(runner):
+    result = runner.invoke(app, ["mcp-config", "--format", "claude-desktop"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "project-memory" in data
+    assert "command" in data["project-memory"]
+
+
+def test_mcp_config_cursor(runner):
+    result = runner.invoke(app, ["mcp-config", "--format", "cursor"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "project-memory" in data
+
+
+def test_mcp_config_default_format(runner):
+    result = runner.invoke(app, ["mcp-config"])
+    assert result.exit_code == 0
+    # Should produce valid JSON
+    data = json.loads(result.output)
+    assert "project-memory" in data
+
+
+# --- init adds .project-memory/ to .gitignore ---
+
+
+def test_init_adds_to_gitignore(tmp_path, runner):
+    (tmp_path / ".git").mkdir()
+    result = runner.invoke(app, ["init", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    gitignore = tmp_path / ".gitignore"
+    assert gitignore.exists()
+    assert ".project-memory/" in gitignore.read_text()
+
+
+def test_init_appends_to_existing_gitignore(tmp_path, runner):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text("node_modules/\n*.pyc\n")
+    result = runner.invoke(app, ["init", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    content = (tmp_path / ".gitignore").read_text()
+    assert "node_modules/" in content  # existing content preserved
+    assert ".project-memory/" in content
+
+
+def test_init_does_not_duplicate_gitignore_entry(tmp_path, runner):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text(".project-memory/\n")
+    result = runner.invoke(app, ["init", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    content = (tmp_path / ".gitignore").read_text()
+    assert content.count(".project-memory/") == 1
+
+
+def test_init_skips_gitignore_without_git(tmp_path, runner):
+    """Without .git, don't touch .gitignore."""
+    result = runner.invoke(app, ["init", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert not (tmp_path / ".gitignore").exists()
