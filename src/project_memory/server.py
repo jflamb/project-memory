@@ -4,6 +4,9 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
@@ -96,6 +99,18 @@ def _validate_version_id(version_id: int) -> Optional[str]:
     if version_id <= 0:
         return "version_id must be a positive integer"
     return None
+
+
+class _BearerAuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, token: str):
+        super().__init__(app)
+        self._expected = f"Bearer {token}"
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path.startswith("/mcp"):
+            if request.headers.get("authorization") != self._expected:
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return await call_next(request)
 
 
 def create_mcp_server(root: str | None = None) -> FastMCP:
@@ -475,7 +490,10 @@ def create_stdio_server() -> FastMCP:
     return mcp
 
 
-def create_app(root: str | None = None) -> Starlette:
+def create_app(root: str | None = None, auth_token: str | None = None) -> Starlette:
+    token = auth_token or os.environ.get("PROJECT_MEMORY_MCP_AUTH_TOKEN")
+    if not token:
+        raise ValueError("auth_token is required for HTTP MCP")
     mcp = create_mcp_server(root=root)
 
     async def healthcheck(_request) -> JSONResponse:
@@ -492,4 +510,5 @@ def create_app(root: str | None = None) -> Starlette:
             Mount("/mcp", app=mcp.streamable_http_app()),
         ],
         lifespan=lifespan,
+        middleware=[Middleware(_BearerAuthMiddleware, token=token)],
     )

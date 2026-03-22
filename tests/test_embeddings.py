@@ -1,13 +1,17 @@
 """Tests for embedding configuration, storage, and hybrid search."""
 
 import json
+import os
+import stat
 import struct
 
+import httpx
 import pytest
 
 from project_memory.db import ProjectMemoryDB
 from project_memory.embeddings import (
     EmbeddingConfig,
+    embed_texts,
     load_embedding_config,
     save_embedding_config,
     store_embedding,
@@ -41,6 +45,8 @@ def test_save_and_load_config(tmp_path):
     assert loaded is not None
     assert loaded.api_key == "sk-test-123"
     assert loaded.model == "text-embedding-3-small"
+    assert stat.S_IMODE(os.stat(tmp_path).st_mode) == 0o700
+    assert stat.S_IMODE(os.stat(tmp_path / "config.json").st_mode) == 0o600
 
 
 def test_config_env_var_override(tmp_path, monkeypatch):
@@ -141,3 +147,102 @@ def test_hybrid_search_returns_search_mode(db):
 
     results = hybrid_search(db, query="test", query_vector=_make_vector(val=0.5), limit=5)
     assert all(r["search_mode"] == "hybrid" for r in results)
+
+
+# --- embedding API client ---
+
+
+@pytest.mark.anyio
+async def test_embed_texts_returns_empty_for_no_input():
+    config = EmbeddingConfig(api_key="sk-test")
+    assert await embed_texts(config, []) == []
+
+
+@pytest.mark.anyio
+async def test_embed_texts_success_forwards_dimensions_and_orders_results(monkeypatch):
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 1, "embedding": [0.2, 0.2]},
+                    {"index": 0, "embedding": [0.1, 0.1]},
+                ]
+            },
+            request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def client_with_mock_transport(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_with_mock_transport)
+
+    config = EmbeddingConfig(api_key="sk-test", base_url="https://example.test", dimensions=2)
+    vectors = await embed_texts(config, ["first", "second"])
+    assert vectors == [[0.1, 0.1], [0.2, 0.2]]
+    assert requests == [{"model": "text-embedding-3-small", "input": ["first", "second"], "dimensions": 2}]
+
+
+@pytest.mark.anyio
+async def test_embed_texts_batches_requests(monkeypatch):
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        requests.append(payload)
+        start = len(requests) * 50 - 50
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": idx, "embedding": [start + idx]}
+                    for idx, _text in enumerate(payload["input"])
+                ]
+            },
+            request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def client_with_mock_transport(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_with_mock_transport)
+
+    config = EmbeddingConfig(api_key="sk-test", base_url="https://example.test")
+    texts = [f"text-{i}" for i in range(51)]
+    vectors = await embed_texts(config, texts)
+
+    assert len(requests) == 2
+    assert len(requests[0]["input"]) == 50
+    assert len(requests[1]["input"]) == 1
+    assert vectors[0] == [0]
+    assert vectors[-1] == [50]
+
+
+@pytest.mark.anyio
+async def test_embed_texts_raises_for_http_errors(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "unauthorized"}, request=request)
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def client_with_mock_transport(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_with_mock_transport)
+
+    config = EmbeddingConfig(api_key="sk-test", base_url="https://example.test")
+    with pytest.raises(httpx.HTTPStatusError):
+        await embed_texts(config, ["first"])

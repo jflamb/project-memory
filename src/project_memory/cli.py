@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
@@ -656,13 +657,18 @@ def serve_stdio_command():
 def serve_mcp_command(
     host: str = typer.Option("127.0.0.1", help="Host to bind"),
     port: int = typer.Option(8000, help="Port to bind"),
+    auth_token: str = typer.Option("", "--auth-token", help="Bearer token for HTTP MCP access", envvar="PROJECT_MEMORY_MCP_AUTH_TOKEN"),
     path: RepoPath = ".",
 ):
     """Run the MCP HTTP server."""
     import uvicorn
 
-    mcp_app = create_app(root=path)
+    if not auth_token:
+        auth_token = secrets.token_urlsafe(24)
+        typer.echo(f"Generated MCP auth token: {auth_token}")
+    mcp_app = create_app(root=path, auth_token=auth_token)
     typer.echo(f"Starting MCP server on http://{host}:{port}/mcp/")
+    typer.echo("Use Authorization: Bearer <token> when connecting to /mcp/")
     uvicorn.run(mcp_app, host=host, port=port)
 
 

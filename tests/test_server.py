@@ -17,11 +17,15 @@ def anyio_backend():
 @pytest.mark.anyio
 async def test_mcp_server_exposes_tools_and_can_search(tmp_path):
     (tmp_path / "memory.txt").write_text("repo scoped memory")
-    app = create_app(str(tmp_path))
+    app = create_app(str(tmp_path), auth_token="test-token")
 
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as http_client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1:8000",
+            headers={"Authorization": "Bearer test-token"},
+        ) as http_client:
             async with streamable_http_client("http://127.0.0.1:8000/mcp/", http_client=http_client) as (read_stream, write_stream, _):
                 async with ClientSession(read_stream, write_stream) as client:
                     await client.initialize()
@@ -45,11 +49,15 @@ async def test_mcp_server_plan_get_and_history_tools(tmp_path):
         db.plan_create("roadmap", "version one", type="design")
         db.plan_create("roadmap", "version two", type="design")
 
-    app = create_app(str(tmp_path))
+    app = create_app(str(tmp_path), auth_token="test-token")
 
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as http_client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1:8000",
+            headers={"Authorization": "Bearer test-token"},
+        ) as http_client:
             async with streamable_http_client("http://127.0.0.1:8000/mcp/", http_client=http_client) as (read_stream, write_stream, _):
                 async with ClientSession(read_stream, write_stream) as client:
                     await client.initialize()
@@ -72,11 +80,15 @@ async def test_mcp_server_plan_get_and_history_tools(tmp_path):
 
 @pytest.mark.anyio
 async def test_mcp_server_returns_structured_errors_for_invalid_and_missing_inputs(tmp_path):
-    app = create_app(str(tmp_path))
+    app = create_app(str(tmp_path), auth_token="test-token")
 
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as http_client:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1:8000",
+            headers={"Authorization": "Bearer test-token"},
+        ) as http_client:
             async with streamable_http_client("http://127.0.0.1:8000/mcp/", http_client=http_client) as (read_stream, write_stream, _):
                 async with ClientSession(read_stream, write_stream) as client:
                     await client.initialize()
@@ -99,6 +111,27 @@ async def test_mcp_server_returns_structured_errors_for_invalid_and_missing_inpu
                     missing_history = await client.call_tool("history_restore", {"version_id": 9999})
                     missing_history_data = json.loads(missing_history.content[0].text)
                     assert missing_history_data["error"] == "No history version found with id '9999'"
+
+
+@pytest.mark.anyio
+async def test_mcp_server_http_auth_rejects_missing_and_wrong_tokens(tmp_path):
+    app = create_app(str(tmp_path), auth_token="test-token")
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as http_client:
+            missing = await http_client.get("/mcp/")
+            assert missing.status_code == 401
+            assert missing.json()["error"] == "Unauthorized"
+
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1:8000",
+            headers={"Authorization": "Bearer wrong-token"},
+        ) as http_client:
+            wrong = await http_client.get("/mcp/")
+            assert wrong.status_code == 401
+            assert wrong.json()["error"] == "Unauthorized"
 
 
 # --- MCP stdio server: type support ---

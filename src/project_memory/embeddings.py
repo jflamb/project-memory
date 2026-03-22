@@ -2,8 +2,9 @@
 
 import json
 import os
+import stat
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
@@ -25,6 +26,7 @@ def save_embedding_config(config: EmbeddingConfig, config_dir: Path = None) -> P
     """Save embedding config to a JSON file. Returns the path written."""
     config_dir = config_dir or _DEFAULT_CONFIG_DIR
     config_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(config_dir, stat.S_IRWXU)
     path = config_dir / _CONFIG_FILENAME
     data = {
         "api_key": config.api_key,
@@ -33,6 +35,7 @@ def save_embedding_config(config: EmbeddingConfig, config_dir: Path = None) -> P
         "dimensions": config.dimensions,
     }
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
     return path
 
 
@@ -168,6 +171,9 @@ async def embed_texts(config: EmbeddingConfig, texts: List[str]) -> List[list[fl
     """
     import httpx
 
+    if not texts:
+        return []
+
     all_embeddings = []
     batch_size = 50
 
@@ -183,6 +189,7 @@ async def embed_texts(config: EmbeddingConfig, texts: List[str]) -> List[list[fl
                 json={
                     "model": config.model,
                     "input": batch,
+                    "dimensions": config.dimensions,
                 },
             )
             response.raise_for_status()
