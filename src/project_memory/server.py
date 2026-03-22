@@ -14,6 +14,10 @@ from .index import index_repo as index_repository
 from .portability import export_memory as do_export, import_memory as do_import
 from .search import search as search_repository
 
+VALID_HISTORY_SOURCE_TYPES = {"note", "learning", "task", "plan"}
+VALID_TASK_STATUSES = {"pending", "in_progress", "done"}
+VALID_PLAN_STATUSES = {"active", "archived"}
+
 
 def _resolve_root(root: str | None) -> Path:
     return Path(root or ".").resolve()
@@ -56,6 +60,44 @@ def _build_protocol_reminder(db: ProjectMemoryDB) -> Optional[str]:
     return f"Active protocols: {', '.join(names)}. Check protocols for blast radius requirements before committing."
 
 
+def _validate_key(key: str) -> Optional[str]:
+    if not key or not key.strip():
+        return "key must not be empty"
+    if ":" in key:
+        return "key must not contain ':'"
+    return None
+
+
+def _validate_limit(limit: int) -> Optional[str]:
+    if limit <= 0:
+        return "limit must be a positive integer"
+    return None
+
+
+def _validate_history_source_type(source_type: str) -> Optional[str]:
+    if source_type not in VALID_HISTORY_SOURCE_TYPES:
+        return "source_type must be one of: learning, note, plan, task"
+    return None
+
+
+def _validate_task_status(status: str) -> Optional[str]:
+    if status and status not in VALID_TASK_STATUSES:
+        return "status must be one of: done, in_progress, pending"
+    return None
+
+
+def _validate_plan_status(status: str) -> Optional[str]:
+    if status and status not in VALID_PLAN_STATUSES:
+        return "status must be one of: active, archived"
+    return None
+
+
+def _validate_version_id(version_id: int) -> Optional[str]:
+    if version_id <= 0:
+        return "version_id must be a positive integer"
+    return None
+
+
 def create_mcp_server(root: str | None = None) -> FastMCP:
     repo_root = _resolve_root(root)
     mcp = FastMCP(
@@ -80,6 +122,8 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
     @mcp.tool()
     def search(query: str, limit: int = 20) -> list[dict]:
         """Search indexed repository content using normalized full-text terms."""
+        if error := _validate_limit(limit):
+            return [{"error": error}]
         return search_repository(query=query, root=str(repo_root), limit=limit)
 
     @mcp.tool()
@@ -91,6 +135,8 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
     @mcp.tool()
     def plan_get(key: str) -> dict:
         """Get a single plan by key. Returns the full plan content."""
+        if error := _validate_key(key):
+            return {"error": error}
         with ProjectMemoryDB(root=repo_root) as db:
             plan = db.plan_get(key)
         return plan or {"error": f"No plan found with key '{key}'"}
@@ -98,6 +144,12 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
     @mcp.tool()
     def history_list(key: str, source_type: str, limit: int = 20) -> dict:
         """List immutable history snapshots for a typed memory entry."""
+        if error := _validate_key(key):
+            return {"error": error}
+        if error := _validate_history_source_type(source_type):
+            return {"error": error}
+        if error := _validate_limit(limit):
+            return {"error": error}
         with ProjectMemoryDB(root=repo_root) as db:
             results = db.history_list(key=key, source_type=source_type, limit=limit)
         return {"results": results}
@@ -105,6 +157,8 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
     @mcp.tool()
     def history_get(version_id: int) -> dict:
         """Get a single history snapshot by version id."""
+        if error := _validate_version_id(version_id):
+            return {"error": error}
         with ProjectMemoryDB(root=repo_root) as db:
             version = db.history_get(version_id)
         return version or {"error": f"No history version found with id '{version_id}'"}
@@ -112,6 +166,10 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
     @mcp.tool()
     def history_diff(version_a: int, version_b: int) -> dict:
         """Return a unified diff between two history snapshots."""
+        if error := _validate_version_id(version_a):
+            return {"error": error}
+        if error := _validate_version_id(version_b):
+            return {"error": error}
         with ProjectMemoryDB(root=repo_root) as db:
             diff = db.history_diff(version_a, version_b)
         return diff or {"error": "One or both history versions were not found"}
@@ -119,6 +177,8 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
     @mcp.tool()
     def history_restore(version_id: int) -> dict:
         """Restore a history snapshot as the latest current state."""
+        if error := _validate_version_id(version_id):
+            return {"error": error}
         with ProjectMemoryDB(root=repo_root) as db:
             restored = db.history_restore(version_id)
         return restored or {"error": f"No history version found with id '{version_id}'"}
@@ -147,6 +207,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def search(query: str, limit: int = 20) -> dict:
         """Search indexed repository content using keyword search (FTS5 bm25)."""
+        if error := _validate_limit(limit):
+            return {"error": error}
         root = _cwd_root()
         with ProjectMemoryDB(root=root) as db:
             results = db.search(query, limit=limit)
@@ -179,6 +241,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def remember(key: str, content: str, type: str = "") -> dict:
         """Store a note in project memory. Key is a short identifier (e.g. 'auth-pattern', 'deploy-steps'). Content is the text to remember. Provide a type to classify this note (e.g. 'convention', 'reference', 'decision'). Check existing types with recall first and reuse one if appropriate before introducing a new type."""
+        if error := _validate_key(key):
+            return {"error": error}
         with _ensure_db() as db:
             written = db.remember(key, content, type=type or None)
             reminder = _build_protocol_reminder(db)
@@ -190,6 +254,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def forget(key: str) -> dict:
         """Remove a note from project memory by key."""
+        if error := _validate_key(key):
+            return {"error": error}
         with _ensure_db() as db:
             deleted = db.forget(key)
         return {"key": key, "deleted": deleted}
@@ -197,6 +263,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def recall(query: str = "", type: str = "", limit: int = 20) -> dict:
         """Retrieve notes from project memory. If query is given, search notes by content. If empty, list all notes. Filter by type if provided."""
+        if error := _validate_limit(limit):
+            return {"error": error}
         with _ensure_db() as db:
             results, types_in_use = db.recall_with_types(query=query or None, type=type or None, limit=limit)
         return {"results": results, "types_in_use": types_in_use}
@@ -206,6 +274,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def learn(key: str, content: str, type: str = "") -> dict:
         """Store a learning — knowledge discovered during development (e.g. 'sqlite-alter-limits', 'fts5-trigger-pattern'). Content is what was learned. Provide a type to classify this learning (e.g. 'gotcha', 'pattern', 'tool-tip'). Check existing types with recall_learnings first and reuse one if appropriate before introducing a new type."""
+        if error := _validate_key(key):
+            return {"error": error}
         with _ensure_db() as db:
             written = db.learn(key, content, type=type or None)
             reminder = _build_protocol_reminder(db)
@@ -217,6 +287,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def recall_learnings(query: str = "", type: str = "", limit: int = 20) -> dict:
         """Retrieve learnings. If query is given, search by content. If empty, list all learnings. Filter by type if provided."""
+        if error := _validate_limit(limit):
+            return {"error": error}
         with _ensure_db() as db:
             results, types_in_use = db.recall_learnings_with_types(query=query or None, type=type or None, limit=limit)
         return {"results": results, "types_in_use": types_in_use}
@@ -224,6 +296,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def forget_learning(key: str) -> dict:
         """Remove a learning by key."""
+        if error := _validate_key(key):
+            return {"error": error}
         with _ensure_db() as db:
             deleted = db.forget_learning(key)
         return {"key": key, "deleted": deleted}
@@ -233,6 +307,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def task_add(key: str, content: str, group: str = "", type: str = "") -> dict:
         """Add a task with status 'pending'. Key is a short identifier. Group is optional (e.g. 'v0.2', 'auth-feature'). Provide a type to classify this task (e.g. 'bug', 'feature', 'chore', 'spike'). After adding, assess blast radius per project protocols."""
+        if error := _validate_key(key):
+            return {"error": error}
         with _ensure_db() as db:
             written = db.task_add(key, content, group=group or None, type=type or None)
             reminder = _build_protocol_reminder(db)
@@ -244,6 +320,10 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def task_update(key: str, status: str = "", content: str = "", group: str = "") -> dict:
         """Update a task. Status can be 'pending', 'in_progress', or 'done'. Only provided fields are changed."""
+        if error := _validate_key(key):
+            return {"error": error}
+        if error := _validate_task_status(status):
+            return {"error": error}
         with _ensure_db() as db:
             updated = db.task_update(
                 key,
@@ -256,6 +336,10 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def task_list(status: str = "", group: str = "", type: str = "", query: str = "", limit: int = 50) -> dict:
         """List tasks. Filter by status ('pending', 'in_progress', 'done'), group, and/or type. Search by content with query."""
+        if error := _validate_task_status(status):
+            return {"error": error}
+        if error := _validate_limit(limit):
+            return {"error": error}
         with _ensure_db() as db:
             results, types_in_use = db.task_list_with_types(
                 status=status or None,
@@ -269,6 +353,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def task_remove(key: str) -> dict:
         """Remove a task by key."""
+        if error := _validate_key(key):
+            return {"error": error}
         with _ensure_db() as db:
             deleted = db.task_remove(key)
         return {"key": key, "deleted": deleted}
@@ -278,6 +364,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def plan_create(key: str, content: str, type: str = "") -> dict:
         """Create or update a plan. Content is markdown. Status starts as 'active'. Provide a type to classify this plan (e.g. 'protocol', 'design', 'checklist')."""
+        if error := _validate_key(key):
+            return {"error": error}
         with _ensure_db() as db:
             written = db.plan_create(key, content, type=type or None)
             reminder = _build_protocol_reminder(db)
@@ -289,6 +377,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def plan_get(key: str) -> dict:
         """Get a single plan by key. Returns the full plan content."""
+        if error := _validate_key(key):
+            return {"error": error}
         with _ensure_db() as db:
             plan = db.plan_get(key)
         return plan or {"error": f"No plan found with key '{key}'"}
@@ -296,6 +386,10 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def plan_list(status: str = "active", type: str = "", query: str = "", limit: int = 20) -> dict:
         """List plans. Defaults to active plans. Set status to 'archived' or '' for all. Filter by type if provided."""
+        if error := _validate_plan_status(status):
+            return {"error": error}
+        if error := _validate_limit(limit):
+            return {"error": error}
         with _ensure_db() as db:
             results, types_in_use = db.plan_list_with_types(
                 status=status or None,
@@ -308,6 +402,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def plan_archive(key: str) -> dict:
         """Archive a plan (mark as done). Archived plans are hidden from default plan_list."""
+        if error := _validate_key(key):
+            return {"error": error}
         with _ensure_db() as db:
             archived = db.plan_archive(key)
         return {"key": key, "archived": archived}
@@ -315,6 +411,12 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def history_list(key: str, source_type: str, limit: int = 20) -> dict:
         """List immutable history snapshots for a typed memory entry."""
+        if error := _validate_key(key):
+            return {"error": error}
+        if error := _validate_history_source_type(source_type):
+            return {"error": error}
+        if error := _validate_limit(limit):
+            return {"error": error}
         with _ensure_db() as db:
             results = db.history_list(key=key, source_type=source_type, limit=limit)
         return {"results": results}
@@ -322,6 +424,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def history_get(version_id: int) -> dict:
         """Get a single history snapshot by version id."""
+        if error := _validate_version_id(version_id):
+            return {"error": error}
         with _ensure_db() as db:
             version = db.history_get(version_id)
         return version or {"error": f"No history version found with id '{version_id}'"}
@@ -329,6 +433,10 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def history_diff(version_a: int, version_b: int) -> dict:
         """Return a unified diff between two history snapshots."""
+        if error := _validate_version_id(version_a):
+            return {"error": error}
+        if error := _validate_version_id(version_b):
+            return {"error": error}
         with _ensure_db() as db:
             diff = db.history_diff(version_a, version_b)
         return diff or {"error": "One or both history versions were not found"}
@@ -336,6 +444,8 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def history_restore(version_id: int) -> dict:
         """Restore a history snapshot as the latest current state."""
+        if error := _validate_version_id(version_id):
+            return {"error": error}
         with _ensure_db() as db:
             restored = db.history_restore(version_id)
         return restored or {"error": f"No history version found with id '{version_id}'"}

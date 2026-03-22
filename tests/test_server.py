@@ -70,6 +70,37 @@ async def test_mcp_server_plan_get_and_history_tools(tmp_path):
                     assert "version two" in diff_data["diff"]
 
 
+@pytest.mark.anyio
+async def test_mcp_server_returns_structured_errors_for_invalid_and_missing_inputs(tmp_path):
+    app = create_app(str(tmp_path))
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as http_client:
+            async with streamable_http_client("http://127.0.0.1:8000/mcp/", http_client=http_client) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as client:
+                    await client.initialize()
+
+                    invalid_history = await client.call_tool(
+                        "history_list",
+                        {"key": "roadmap", "source_type": "file", "limit": 1},
+                    )
+                    invalid_history_data = json.loads(invalid_history.content[0].text)
+                    assert invalid_history_data["error"] == "source_type must be one of: learning, note, plan, task"
+
+                    invalid_search = await client.call_tool("search", {"query": "repo", "limit": 0})
+                    invalid_search_data = json.loads(invalid_search.content[0].text)
+                    assert invalid_search_data["error"] == "limit must be a positive integer"
+
+                    missing_plan = await client.call_tool("plan_get", {"key": "missing"})
+                    missing_plan_data = json.loads(missing_plan.content[0].text)
+                    assert missing_plan_data["error"] == "No plan found with key 'missing'"
+
+                    missing_history = await client.call_tool("history_restore", {"version_id": 9999})
+                    missing_history_data = json.loads(missing_history.content[0].text)
+                    assert missing_history_data["error"] == "No history version found with id '9999'"
+
+
 # --- MCP stdio server: type support ---
 
 
@@ -167,6 +198,76 @@ async def test_stdio_stats_reports_history_versions(tmp_path, monkeypatch):
     assert data["documents"] == 1
     assert data["versions"] == 2
     assert data["size_bytes"] > 0
+
+
+@pytest.mark.anyio
+async def test_stdio_management_tools_cover_missing_paths_and_updates(tmp_path, monkeypatch):
+    from project_memory.db import ProjectMemoryDB
+
+    monkeypatch.chdir(tmp_path)
+    with ProjectMemoryDB(root=tmp_path) as db:
+        db.remember("note-key", "note")
+        db.learn("learning-key", "learning")
+        db.task_add("task-key", "task")
+        db.plan_create("plan-key", "plan")
+
+    mcp = create_stdio_server()
+
+    forget_result = json.loads((await mcp.call_tool("forget", {"key": "note-key"}))[0].text)
+    assert forget_result == {"key": "note-key", "deleted": True}
+
+    forget_learning_result = json.loads((await mcp.call_tool("forget_learning", {"key": "learning-key"}))[0].text)
+    assert forget_learning_result == {"key": "learning-key", "deleted": True}
+
+    update_result = json.loads(
+        (await mcp.call_tool("task_update", {"key": "task-key", "status": "done", "content": "updated"}))[0].text
+    )
+    assert update_result == {"key": "task-key", "updated": True}
+
+    remove_result = json.loads((await mcp.call_tool("task_remove", {"key": "task-key"}))[0].text)
+    assert remove_result == {"key": "task-key", "deleted": True}
+
+    archive_result = json.loads((await mcp.call_tool("plan_archive", {"key": "plan-key"}))[0].text)
+    assert archive_result == {"key": "plan-key", "archived": True}
+
+    missing_remove_result = json.loads((await mcp.call_tool("task_remove", {"key": "task-key"}))[0].text)
+    assert missing_remove_result == {"key": "task-key", "deleted": False}
+
+    docs_result = (await mcp.call_tool("list_documents", {}))[1]["result"]
+    assert any(doc["path"] == "plan:plan-key" for doc in docs_result)
+
+
+@pytest.mark.anyio
+async def test_stdio_validation_errors_are_returned_consistently(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mcp = create_stdio_server()
+
+    invalid_key = json.loads((await mcp.call_tool("remember", {"key": "bad:key", "content": "value"}))[0].text)
+    assert invalid_key["error"] == "key must not contain ':'"
+
+    empty_key = json.loads((await mcp.call_tool("forget", {"key": ""}))[0].text)
+    assert empty_key["error"] == "key must not be empty"
+
+    invalid_task_status = json.loads(
+        (await mcp.call_tool("task_update", {"key": "task", "status": "waiting"}))[0].text
+    )
+    assert invalid_task_status["error"] == "status must be one of: done, in_progress, pending"
+
+    invalid_plan_status = json.loads(
+        (await mcp.call_tool("plan_list", {"status": "disabled", "limit": 1}))[0].text
+    )
+    assert invalid_plan_status["error"] == "status must be one of: active, archived"
+
+    invalid_limit = json.loads((await mcp.call_tool("recall", {"limit": 0}))[0].text)
+    assert invalid_limit["error"] == "limit must be a positive integer"
+
+    invalid_history_type = json.loads(
+        (await mcp.call_tool("history_list", {"key": "task", "source_type": "file"}))[0].text
+    )
+    assert invalid_history_type["error"] == "source_type must be one of: learning, note, plan, task"
+
+    invalid_version = json.loads((await mcp.call_tool("history_get", {"version_id": 0}))[0].text)
+    assert invalid_version["error"] == "version_id must be a positive integer"
 
 
 # --- MCP stdio server: export/import ---
