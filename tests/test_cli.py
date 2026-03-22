@@ -500,6 +500,7 @@ def test_index_skip_embeddings_flag(initialized_repo, runner):
     result = runner.invoke(app, ["index", "--skip-embeddings", "--path", str(initialized_repo)])
     assert result.exit_code == 0
     assert "Indexed" in result.output
+    assert "no-op" in result.output.lower()
 
 
 def test_search_shows_search_mode(initialized_repo, runner):

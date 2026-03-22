@@ -28,7 +28,7 @@ _SECTION_SOURCE_TYPE = {
 
 
 def export_memory(db: ProjectMemoryDB) -> str:
-    """Export all active memory entries to a MEMORY.md-format string."""
+    """Export memory entries to a MEMORY.md-format string."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     lines = [
         "# Project Memory",
@@ -38,7 +38,7 @@ def export_memory(db: ProjectMemoryDB) -> str:
     ]
 
     # Plans grouped by type: protocols, designs, checklists, then untyped
-    plans = db.plan_list(status="active", limit=1000)
+    plans = db.plan_list(status=None, limit=1000)
     typed_plans: dict[str, list[dict]] = {t: [] for t in _PLAN_TYPE_SECTIONS}
     untyped_plans: list[dict] = []
     for p in plans:
@@ -238,7 +238,13 @@ def _write_entry(db: ProjectMemoryDB, entry: dict) -> bool:
     elif source_type == "learning":
         return db.learn(key, content, type=entry_type)
     elif source_type == "task":
-        return db.task_add(key, content, group=entry.get("group"), type=entry_type)
+        return db.task_add(
+            key,
+            content,
+            group=entry.get("group"),
+            type=entry_type,
+            status=entry.get("status") or "pending",
+        )
     elif source_type == "plan":
-        return db.plan_create(key, content, type=entry_type)
+        return db.plan_create(key, content, type=entry_type, status=entry.get("status") or "active")
     return False

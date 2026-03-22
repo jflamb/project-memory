@@ -244,3 +244,21 @@ def test_reindex_cleans_up_old_chunks(repo):
         chunk_paths = [p for p in paths if "file.py#chunk-" in p]
         assert len(chunk_paths) == 0
         assert "file.py" in paths
+
+
+def test_reindex_preserves_typed_memory(repo):
+    """Reindex should only remove stale file documents, not notes/tasks/plans."""
+    (repo / "file.py").write_text("print('hello')\n")
+    with ProjectMemoryDB(root=repo) as db:
+        db.remember("note1", "important note")
+        db.task_add("task1", "do thing")
+        db.plan_create("plan1", "ship it")
+
+    index_repo(root=str(repo))
+
+    with ProjectMemoryDB(root=repo) as db:
+        paths = [d["path"] for d in db.list_documents()]
+        assert "file.py" in paths
+        assert "note:note1" in paths
+        assert "task:task1" in paths
+        assert "plan:plan1" in paths

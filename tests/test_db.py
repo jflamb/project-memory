@@ -199,6 +199,13 @@ def test_remember_updates_changed(db):
     assert notes[0]["content"] == "version 2"
 
 
+def test_remember_updates_type_without_content_change(db):
+    db.remember("key1", "version 1")
+    assert db.remember("key1", "version 1", type="reference") is True
+    notes = db.recall()
+    assert notes[0]["type"] == "reference"
+
+
 def test_forget_removes_note(db):
     db.remember("temp", "temporary note")
     assert db.forget("temp") is True
@@ -312,6 +319,14 @@ def test_task_update_content(db):
     assert tasks[0]["content"] == "updated description"
 
 
+def test_task_update_group_only(db):
+    db.task_add("t1", "original", group="v0.1")
+    assert db.task_update("t1", group="v0.2") is True
+    tasks = db.task_list(group="v0.2")
+    assert len(tasks) == 1
+    assert tasks[0]["group"] == "v0.2"
+
+
 def test_task_update_nonexistent(db):
     assert db.task_update("ghost", status="done") is False
 
@@ -390,6 +405,12 @@ def test_plan_update_content(db):
     db.plan_create("p1", "version 2")
     plan = db.plan_get("p1")
     assert plan["content"] == "version 2"
+
+
+def test_plan_create_can_preserve_archived_status(db):
+    db.plan_create("p1", "version 1", status="archived")
+    plan = db.plan_get("p1")
+    assert plan["status"] == "archived"
 
 
 def test_plan_search(db):

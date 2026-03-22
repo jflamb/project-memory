@@ -249,21 +249,26 @@ class ProjectMemoryDB:
         self.conn.commit()
         return True
 
-    def delete_missing_documents(self, paths_to_keep: Iterable[str]) -> int:
-        """Delete documents whose paths are not in paths_to_keep. Returns count deleted."""
+    def delete_missing_documents(self, paths_to_keep: Iterable[str], source_type: str = "file") -> int:
+        """Delete documents of a given source_type whose paths are not in paths_to_keep."""
         keep = list(paths_to_keep)
         if keep:
             placeholders = ",".join("?" for _ in keep)
             cur = self.conn.execute(
-                f"SELECT COUNT(*) FROM documents WHERE path NOT IN ({placeholders})", keep
+                f"SELECT COUNT(*) FROM documents WHERE source_type = ? AND path NOT IN ({placeholders})",
+                [source_type, *keep],
             )
             count = cur.fetchone()[0]
             self.conn.execute(
-                f"DELETE FROM documents WHERE path NOT IN ({placeholders})", keep
+                f"DELETE FROM documents WHERE source_type = ? AND path NOT IN ({placeholders})",
+                [source_type, *keep],
             )
         else:
-            count = self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-            self.conn.execute("DELETE FROM documents")
+            count = self.conn.execute(
+                "SELECT COUNT(*) FROM documents WHERE source_type = ?",
+                (source_type,),
+            ).fetchone()[0]
+            self.conn.execute("DELETE FROM documents WHERE source_type = ?", (source_type,))
         self.conn.commit()
         return count
 
@@ -296,10 +301,20 @@ class ProjectMemoryDB:
         """Insert or update a typed entry. Returns True if written, False if unchanged."""
         path = f"{prefix}:{key}"
         new_hash = content_hash(content)
-        cur = self.conn.execute("SELECT id, content_hash, status FROM documents WHERE path = ?", (path,))
+        cur = self.conn.execute(
+            'SELECT id, content_hash, source_type, status, "group", type FROM documents WHERE path = ?',
+            (path,),
+        )
         existing = cur.fetchone()
 
-        if existing and existing["content_hash"] == new_hash and existing["status"] == status:
+        if (
+            existing
+            and existing["content_hash"] == new_hash
+            and existing["source_type"] == source_type
+            and existing["status"] == status
+            and existing["group"] == group
+            and existing["type"] == type
+        ):
             return False
 
         now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
@@ -412,9 +427,16 @@ class ProjectMemoryDB:
 
     # --- Tasks ---
 
-    def task_add(self, key: str, content: str, group: str = None, type: str = None) -> bool:
-        """Add a task with status 'pending'."""
-        return self._put("task", "task", key, content, status="pending", group=group, type=type)
+    def task_add(
+        self,
+        key: str,
+        content: str,
+        group: str = None,
+        type: str = None,
+        status: str = "pending",
+    ) -> bool:
+        """Add or replace a task, defaulting to status 'pending'."""
+        return self._put("task", "task", key, content, status=status, group=group, type=type)
 
     def task_update(self, key: str, status: str = None, content: str = None, group: str = None) -> bool:
         """Update a task's status, content, or group. Returns True if changed."""
@@ -448,9 +470,9 @@ class ProjectMemoryDB:
 
     # --- Plans ---
 
-    def plan_create(self, key: str, content: str, type: str = None) -> bool:
-        """Create or update a plan with status 'active'."""
-        return self._put("plan", "plan", key, content, status="active", type=type)
+    def plan_create(self, key: str, content: str, type: str = None, status: str = "active") -> bool:
+        """Create or update a plan, defaulting to status 'active'."""
+        return self._put("plan", "plan", key, content, status=status, type=type)
 
     def plan_get(self, key: str) -> Optional[dict]:
         """Get a single plan by key."""

@@ -102,7 +102,11 @@ def _ensure_gitignore(root: Path):
 
 @app.command()
 def index(
-    skip_embeddings: bool = typer.Option(False, "--skip-embeddings", help="Skip embedding generation (keyword-only reindex)"),
+    skip_embeddings: bool = typer.Option(
+        False,
+        "--skip-embeddings",
+        help="Deprecated no-op. Indexing is keyword-only today.",
+    ),
     path: RepoPath = ".",
 ):
     """Index text files in the repository."""
@@ -110,6 +114,8 @@ def index(
     if not (root / ".project-memory").exists():
         typer.echo("Error: No project memory database found. Run 'project-memory init' first.", err=True)
         raise typer.Exit(code=1)
+    if skip_embeddings:
+        typer.echo("Note: --skip-embeddings is a no-op because embedding indexing is not implemented yet.", err=True)
     result = index_repo(root=str(root))
     typer.echo(f"Indexed {result['total']} documents ({result['skipped']} unchanged, {result['deleted']} removed)")
 
@@ -446,7 +452,7 @@ def setup_embeddings_command(
     base_url: str = typer.Option("https://api.openai.com/v1", "--base-url", help="Base URL for the embedding API"),
     model: str = typer.Option("text-embedding-3-small", "--model", "-m", help="Embedding model name"),
 ):
-    """Configure embedding provider for hybrid search."""
+    """Configure an embedding provider for future search features."""
     from .embeddings import EmbeddingConfig, save_embedding_config
 
     if not api_key:
@@ -462,7 +468,7 @@ def setup_embeddings_command(
 
 @app.command("test-embeddings")
 def test_embeddings_command():
-    """Test the embedding configuration by embedding a sample sentence."""
+    """Test the embedding provider configuration with a sample sentence."""
     from .embeddings import load_embedding_config
 
     config = load_embedding_config()

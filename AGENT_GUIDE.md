@@ -4,6 +4,11 @@
 
 This project provides `project-memory`, a repo-scoped memory engine backed by SQLite + FTS5. Use the MCP tools instead of creating markdown files for persistent memory, tasks, plans, or learnings.
 
+Important current behavior:
+- `index` manages repository file documents only. Reindexing should not remove notes, learnings, tasks, or plans.
+- `search` is keyword-only today, even though embedding configuration commands exist elsewhere in the CLI.
+- `export_memory` / `import_memory` are expected to preserve task and plan status, including archived plans.
+
 ### Available MCP tools
 
 **Notes** — general project knowledge
@@ -47,7 +52,7 @@ Task statuses: `pending`, `in_progress`, `done`. Groups are freeform strings (e.
 | Tool | Purpose |
 |------|---------|
 | `index` | Re-index text files in the repo after changes |
-| `search` | Full-text search across everything (files, notes, learnings, tasks, plans) |
+| `search` | Keyword full-text search across everything (files, notes, learnings, tasks, plans) |
 | `list_documents` | See all indexed entries |
 | `stats` | Document count and database size |
 
@@ -59,13 +64,15 @@ Task statuses: `pending`, `in_progress`, `done`. Groups are freeform strings (e.
 - **Tracking work**: `task_add` for items, `task_update` to mark progress
 - **Planning implementation**: `plan_create` with markdown content, `plan_archive` when done
 - **Before committing/PRing**: Re-check active protocols (`plan_list(type='protocol')`) for blast radius requirements
-- **After writing/deleting files**: `index` to keep the database current
+- **After writing/deleting repository files**: `index` to keep file documents current
+- **After changing notes/tasks/plans via tools**: do not expect `index` to manage those entries
 
 ### What not to do
 
 - Do not create markdown files for memory, notes, plans, or task lists — use the database
 - Do not manually manage `.project-memory/` — it auto-initializes on first tool use
 - Do not drop planning documents into `docs/plans/` — use `plan_create` instead
+- Do not describe semantic or hybrid search as implemented in the current codebase unless you verify it has actually been added
 
 ## Project structure
 

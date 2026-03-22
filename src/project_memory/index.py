@@ -223,6 +223,6 @@ def index_repo(root: str = None) -> dict:
                 if not written:
                     skipped += 1
 
-        deleted = db.delete_missing_documents(indexed_paths)
+        deleted = db.delete_missing_documents(indexed_paths, source_type="file")
 
     return {"total": total, "skipped": skipped, "deleted": deleted}

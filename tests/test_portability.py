@@ -92,7 +92,7 @@ def test_export_archived_plans_excluded(db):
     db.plan_create("current", "active plan")
     md = export_memory(db)
     assert "### current" in md
-    assert "### old" not in md
+    assert "### old" in md
 
 
 # --- parse (round-trip support) ---
@@ -275,6 +275,23 @@ Fix the login bug.
     assert tasks[0]["group"] == "v0.2"
 
 
+def test_import_preserves_done_task_status(db, tmp_path):
+    md = """# Project Memory
+
+## Tasks
+
+### fix-bug
+**Type:** bug | **Status:** done | **Group:** v0.2 | **Updated:** 2026-03-21T10:00:00.000Z
+
+Fix the login bug.
+"""
+    (tmp_path / "MEMORY.md").write_text(md)
+    import_memory(db, tmp_path / "MEMORY.md")
+    tasks = db.task_list(status="done")
+    assert len(tasks) == 1
+    assert tasks[0]["status"] == "done"
+
+
 def test_import_plans(db, tmp_path):
     md = """# Project Memory
 
@@ -290,6 +307,23 @@ Always create a feature branch.
     plans = db.plan_list(status=None)
     assert len(plans) == 1
     assert plans[0]["type"] == "protocol"
+
+
+def test_import_preserves_archived_plan_status(db, tmp_path):
+    md = """# Project Memory
+
+## Designs
+
+### vector-search
+**Type:** design | **Status:** archived | **Updated:** 2026-03-21T10:00:00.000Z
+
+Add embedding-based search alongside FTS5.
+"""
+    (tmp_path / "MEMORY.md").write_text(md)
+    import_memory(db, tmp_path / "MEMORY.md")
+    plans = db.plan_list(status="archived")
+    assert len(plans) == 1
+    assert plans[0]["status"] == "archived"
 
 
 # --- round-trip ---
@@ -327,3 +361,27 @@ def test_export_import_round_trip(db, tmp_path):
         plans = db2.plan_list(status=None)
         assert len(plans) == 1
         assert plans[0]["type"] == "protocol"
+
+
+def test_export_import_round_trip_preserves_archived_plan_and_done_task(tmp_path):
+    db1_path = tmp_path / "db1"
+    db1_path.mkdir()
+    with ProjectMemoryDB(root=db1_path) as db1:
+        db1.task_add("t1", "Fix login", group="v0.2", type="bug")
+        db1.task_update("t1", status="done")
+        db1.plan_create("branching", "Feature branch rules", type="protocol")
+        db1.plan_archive("branching")
+        md = export_memory(db1)
+
+    memory_md = tmp_path / "MEMORY.md"
+    memory_md.write_text(md)
+
+    db2_path = tmp_path / "db2"
+    db2_path.mkdir()
+    with ProjectMemoryDB(root=db2_path) as db2:
+        result = import_memory(db2, memory_md)
+        assert result["imported"] == 2
+        tasks = db2.task_list(status="done")
+        assert len(tasks) == 1
+        plans = db2.plan_list(status="archived")
+        assert len(plans) == 1

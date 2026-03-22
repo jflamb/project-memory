@@ -111,17 +111,14 @@ def create_stdio_server() -> FastMCP:
 
     @mcp.tool()
     def search(query: str, limit: int = 20) -> dict:
-        """Search indexed repository content. Uses keyword search (FTS5 bm25). When embeddings are configured, hybrid search combines keyword + vector similarity."""
+        """Search indexed repository content using keyword search (FTS5 bm25)."""
         root = _cwd_root()
         with ProjectMemoryDB(root=root) as db:
             results = db.search(query, limit=limit)
             search_mode = "keyword"
             for r in results:
                 r["search_mode"] = search_mode
-        hint = None if search_mode == "hybrid" else "Configure embeddings with setup-embeddings for hybrid search."
         response = {"results": results, "search_mode": search_mode}
-        if hint:
-            response["hint"] = hint
         return response
 
     @mcp.tool()
@@ -283,7 +280,7 @@ def create_stdio_server() -> FastMCP:
 
     @mcp.tool()
     def export_memory() -> dict:
-        """Export all active memory entries to MEMORY.md in the repo root. Returns the file path."""
+        """Export memory entries to MEMORY.md in the repo root. Returns the file path."""
         root = _cwd_root()
         with _ensure_db() as db:
             md = do_export(db)
