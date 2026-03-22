@@ -1,6 +1,6 @@
 [project]
 name = "project-memory"
-version = "0.2.2"
+version = "0.2.3"
 description = "Project Memory: repo-scoped memory engine for AI agents"
 readme = "README.md"
 requires-python = ">=3.10"

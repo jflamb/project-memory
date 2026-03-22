@@ -622,21 +622,21 @@ def mcp_config_command(
         config = {
             "project-memory": {
                 "command": "uvx",
-                "args": ["project-memory", "serve-stdio"],
+                "args": ["project-memory", "serve-stdio", "--path", "."],
             }
         }
     elif format == "claude-desktop":
         config = {
             "project-memory": {
                 "command": "uvx",
-                "args": ["project-memory", "serve-stdio"],
+                "args": ["project-memory", "serve-stdio", "--path", "."],
             }
         }
     elif format == "cursor":
         config = {
             "project-memory": {
                 "command": "uvx",
-                "args": ["project-memory", "serve-stdio"],
+                "args": ["project-memory", "serve-stdio", "--path", "."],
             }
         }
     else:
@@ -650,9 +650,11 @@ def mcp_config_command(
 
 
 @app.command("serve-stdio")
-def serve_stdio_command():
+def serve_stdio_command(
+    path: RepoPath = "",
+):
     """Run the MCP server over stdio for AI agent integration."""
-    mcp = create_stdio_server()
+    mcp = create_stdio_server(root=path or None)
     mcp.run(transport="stdio")
 
 

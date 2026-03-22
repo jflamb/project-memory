@@ -16,9 +16,9 @@ args = ["-y", "@upstash/context7-mcp@latest"]
 [mcp_servers.exa]
 url = "https://mcp.exa.ai/mcp"
 
-[mcp_servers.memory]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-memory"]
+[mcp_servers.project-memory]
+command = "uvx"
+args = ["project-memory", "serve-stdio", "--path", "."]
 
 [mcp_servers.playwright]
 command = "npx"

@@ -204,22 +204,31 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
     return mcp
 
 
-def create_stdio_server() -> FastMCP:
-    """Create an MCP server for stdio transport. Resolves repo root from cwd on each call."""
+def create_stdio_server(root: str | None = None) -> FastMCP:
+    """Create an MCP server for stdio transport.
+
+    When *root* is given it is used directly as the repo root.  Otherwise
+    the root is resolved from the current working directory on each tool
+    call via ``_cwd_root()``.
+    """
+    resolved_root = Path(root).resolve() if root else None
     mcp = FastMCP(
         "Project Memory",
         instructions="Repo-scoped memory for code indexing and search. Operates on the current working directory.",
         json_response=True,
     )
 
+    def _get_root() -> Path:
+        return resolved_root or _cwd_root()
+
     def _ensure_db() -> ProjectMemoryDB:
-        """Auto-init and return a database for cwd."""
-        return ProjectMemoryDB(root=_cwd_root())
+        """Auto-init and return a database for the repo root."""
+        return ProjectMemoryDB(root=_get_root())
 
     @mcp.tool()
     def index() -> dict:
         """Index supported text files from the repository into local memory. Auto-initializes if needed."""
-        root = _cwd_root()
+        root = _get_root()
         return index_repository(root=str(root))
 
     @mcp.tool()
@@ -227,7 +236,7 @@ def create_stdio_server() -> FastMCP:
         """Search indexed repository content using keyword search (FTS5 bm25)."""
         if error := _validate_limit(limit):
             return {"error": error}
-        root = _cwd_root()
+        root = _get_root()
         with ProjectMemoryDB(root=root) as db:
             results = db.search(query, limit=limit)
             search_mode = "keyword"
@@ -245,7 +254,7 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def stats() -> dict:
         """Show database statistics: document count and database size."""
-        root = _cwd_root()
+        root = _get_root()
         db_path = root / ".project-memory" / "project_memory.db"
         with _ensure_db() as db:
             count = db.document_count()
@@ -473,7 +482,7 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def export_memory() -> dict:
         """Export memory entries to MEMORY.md in the repo root. Returns the file path."""
-        root = _cwd_root()
+        root = _get_root()
         with _ensure_db() as db:
             md = do_export(db)
         out_path = root / "MEMORY.md"
@@ -483,7 +492,7 @@ def create_stdio_server() -> FastMCP:
     @mcp.tool()
     def import_memory() -> dict:
         """Import entries from MEMORY.md in the repo root. Idempotent — unchanged entries are skipped."""
-        root = _cwd_root()
+        root = _get_root()
         md_path = root / "MEMORY.md"
         if not md_path.exists():
             return {"error": "MEMORY.md not found", "imported": 0, "skipped": 0}
