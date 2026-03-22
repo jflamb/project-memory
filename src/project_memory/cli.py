@@ -16,8 +16,10 @@ from .server import create_app, create_stdio_server
 app = typer.Typer(help="Project Memory — repo-scoped memory engine for AI agents")
 task_app = typer.Typer(help="Manage tasks")
 plan_app = typer.Typer(help="Manage plans")
+history_app = typer.Typer(help="Inspect and restore typed memory history")
 app.add_typer(task_app, name="task")
 app.add_typer(plan_app, name="plan")
+app.add_typer(history_app, name="history")
 
 RepoPath = Annotated[
     str, typer.Option("--path", "-p", help="Repository root", envvar="PROJECT_MEMORY_ROOT")
@@ -50,6 +52,17 @@ def _format_list(results: list[dict], prefix: str, output_format: OutputFormat, 
             entry_type = f" <{r['type']}>" if r.get("type") else ""
             typer.echo(f"[{key}]{status}{group}{entry_type}")
             typer.echo(f"  {r['content'][:300]}\n")
+
+
+def _parse_history_entry(entry: str) -> tuple[str, str]:
+    if ":" not in entry:
+        typer.echo("Error: history entry must be prefixed, for example 'note:auth' or 'plan:release'", err=True)
+        raise typer.Exit(code=1)
+    source_type, key = entry.split(":", 1)
+    if source_type not in {"note", "learning", "task", "plan"} or not key:
+        typer.echo("Error: history entry must start with note:, learning:, task:, or plan:", err=True)
+        raise typer.Exit(code=1)
+    return source_type, key
 
 
 # --- Core commands ---
@@ -441,6 +454,100 @@ def plan_archive_command(
     else:
         typer.echo(f"No active plan found with key '{key}'", err=True)
         raise typer.Exit(code=1)
+
+
+# --- History ---
+
+
+@history_app.command("list")
+def history_list_command(
+    entry: str = typer.Argument(..., help="Typed entry path, for example note:auth or plan:release"),
+    path: RepoPath = ".",
+    output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max versions"),
+):
+    """List history snapshots for a typed memory entry."""
+    source_type, key = _parse_history_entry(entry)
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
+        results = db.history_list(key=key, source_type=source_type, limit=limit)
+    if not results:
+        typer.echo("No history found", err=True)
+        raise typer.Exit(code=0)
+
+    if output_format == OutputFormat.json:
+        typer.echo(json.dumps(results, indent=2))
+    elif output_format == OutputFormat.plain:
+        for version in results:
+            typer.echo(
+                f"{version['id']}: {version['entry_path']} {version['operation_type']} {version['version_created_at']}"
+            )
+    else:
+        for version in results:
+            status = f" ({version['status']})" if version.get("status") else ""
+            entry_type = f" <{version['type']}>" if version.get("type") else ""
+            typer.echo(
+                f"[{version['id']}] {version['entry_path']}{status}{entry_type} {version['operation_type']}"
+            )
+            typer.echo(f"  {version['version_created_at']}\n")
+
+
+@history_app.command("show")
+def history_show_command(
+    version_id: int = typer.Argument(..., help="History version id"),
+    path: RepoPath = ".",
+    output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
+):
+    """Show a single history snapshot."""
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
+        version = db.history_get(version_id)
+    if not version:
+        typer.echo(f"No history version found with id '{version_id}'", err=True)
+        raise typer.Exit(code=1)
+
+    if output_format == OutputFormat.json:
+        typer.echo(json.dumps(version, indent=2))
+    else:
+        typer.echo(
+            f"[{version['id']}] {version['entry_path']} ({version['operation_type']}) {version['version_created_at']}"
+        )
+        typer.echo(version["content"])
+
+
+@history_app.command("diff")
+def history_diff_command(
+    version_a: int = typer.Argument(..., help="Older or left-side version id"),
+    version_b: int = typer.Argument(..., help="Newer or right-side version id"),
+    path: RepoPath = ".",
+    output_format: OutputFormat = typer.Option(OutputFormat.table, "--format", "-f", help="Output format"),
+):
+    """Diff two history snapshots."""
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
+        diff = db.history_diff(version_a, version_b)
+    if not diff:
+        typer.echo("One or both history versions were not found", err=True)
+        raise typer.Exit(code=1)
+
+    if output_format == OutputFormat.json:
+        typer.echo(json.dumps(diff, indent=2))
+    else:
+        typer.echo(diff["diff"])
+
+
+@history_app.command("restore")
+def history_restore_command(
+    version_id: int = typer.Argument(..., help="History version id to restore"),
+    path: RepoPath = ".",
+):
+    """Restore a history snapshot as the latest current state."""
+    with ProjectMemoryDB(root=Path(path).resolve()) as db:
+        restored = db.history_restore(version_id)
+    if not restored:
+        typer.echo(f"No history version found with id '{version_id}'", err=True)
+        raise typer.Exit(code=1)
+    if restored["restored"]:
+        typer.echo(f"Restored {restored['path']} from version {version_id}")
+    else:
+        typer.echo(f"{restored['path']} already matched version {version_id}", err=True)
 
 
 # --- Embedding commands ---

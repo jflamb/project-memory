@@ -234,9 +234,9 @@ def _write_entry(db: ProjectMemoryDB, entry: dict) -> bool:
     entry_type = entry.get("type")
 
     if source_type == "note":
-        return db.remember(key, content, type=entry_type)
+        return db.remember(key, content, type=entry_type, operation_type="import")
     elif source_type == "learning":
-        return db.learn(key, content, type=entry_type)
+        return db.learn(key, content, type=entry_type, operation_type="import")
     elif source_type == "task":
         return db.task_add(
             key,
@@ -244,7 +244,14 @@ def _write_entry(db: ProjectMemoryDB, entry: dict) -> bool:
             group=entry.get("group"),
             type=entry_type,
             status=entry.get("status") or "pending",
+            operation_type="import",
         )
     elif source_type == "plan":
-        return db.plan_create(key, content, type=entry_type, status=entry.get("status") or "active")
+        return db.plan_create(
+            key,
+            content,
+            type=entry_type,
+            status=entry.get("status") or "active",
+            operation_type="import",
+        )
     return False

@@ -298,6 +298,69 @@ def test_plan_get_json(initialized_repo, runner):
     assert data["status"] == "active"
 
 
+# --- history ---
+
+
+def test_history_list_and_show_json(initialized_repo, runner):
+    runner.invoke(app, ["remember", "auth", "v1", "--path", str(initialized_repo)])
+    runner.invoke(app, ["remember", "auth", "v2", "--path", str(initialized_repo)])
+
+    result = runner.invoke(
+        app,
+        ["history", "list", "note:auth", "--format", "json", "--path", str(initialized_repo)],
+    )
+    assert result.exit_code == 0
+    versions = json.loads(result.output)
+    assert len(versions) == 2
+
+    result = runner.invoke(
+        app,
+        ["history", "show", str(versions[0]["id"]), "--format", "json", "--path", str(initialized_repo)],
+    )
+    assert result.exit_code == 0
+    version = json.loads(result.output)
+    assert version["content"] == "v2"
+
+
+def test_history_diff_and_restore(initialized_repo, runner):
+    runner.invoke(app, ["task", "add", "t1", "first", "--path", str(initialized_repo)])
+    runner.invoke(app, ["task", "update", "t1", "--status", "done", "--content", "second", "--path", str(initialized_repo)])
+
+    result = runner.invoke(
+        app,
+        ["history", "list", "task:t1", "--format", "json", "--path", str(initialized_repo)],
+    )
+    versions = json.loads(result.output)
+
+    diff_result = runner.invoke(
+        app,
+        [
+            "history",
+            "diff",
+            str(versions[1]["id"]),
+            str(versions[0]["id"]),
+            "--path",
+            str(initialized_repo),
+        ],
+    )
+    assert diff_result.exit_code == 0
+    assert "second" in diff_result.output
+
+    restore_result = runner.invoke(
+        app,
+        ["history", "restore", str(versions[1]["id"]), "--path", str(initialized_repo)],
+    )
+    assert restore_result.exit_code == 0
+    assert "Restored task:t1" in restore_result.output
+
+    list_result = runner.invoke(
+        app,
+        ["task", "list", "--status", "pending", "--format", "json", "--path", str(initialized_repo)],
+    )
+    tasks = json.loads(list_result.output)
+    assert tasks[0]["content"] == "first"
+
+
 # --- type support ---
 
 

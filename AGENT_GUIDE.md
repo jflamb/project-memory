@@ -8,6 +8,7 @@ Important current behavior:
 - `index` manages repository file documents only. Reindexing should not remove notes, learnings, tasks, or plans.
 - `search` is keyword-only today, even though embedding configuration commands exist elsewhere in the CLI.
 - `export_memory` / `import_memory` are expected to preserve task and plan status, including archived plans.
+- Typed memory writes create immutable history snapshots in `entry_versions`; file indexing does not.
 
 ### Available MCP tools
 
@@ -47,6 +48,15 @@ Task statuses: `pending`, `in_progress`, `done`. Groups are freeform strings (e.
 | `plan_list` | List plans (defaults to `active` only) |
 | `plan_archive` | Archive a completed plan |
 
+**History** — immutable snapshots for typed memory
+
+| Tool | Purpose |
+|------|---------|
+| `history_list` | List snapshots for a typed entry (`key` + `source_type`) |
+| `history_get` | Get one snapshot by version id |
+| `history_diff` | Diff two snapshots |
+| `history_restore` | Restore a snapshot as the latest state |
+
 **Search & indexing**
 
 | Tool | Purpose |
@@ -63,6 +73,7 @@ Task statuses: `pending`, `in_progress`, `done`. Groups are freeform strings (e.
 - **Discovering something non-obvious**: `learn` with a descriptive key
 - **Tracking work**: `task_add` for items, `task_update` to mark progress
 - **Planning implementation**: `plan_create` with markdown content, `plan_archive` when done
+- **Reverting or auditing memory changes**: use the history tools instead of editing database files directly
 - **Before committing/PRing**: Re-check active protocols (`plan_list(type='protocol')`) for blast radius requirements
 - **After writing/deleting repository files**: `index` to keep file documents current
 - **After changing notes/tasks/plans via tools**: do not expect `index` to manage those entries

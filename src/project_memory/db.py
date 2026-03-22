@@ -2,6 +2,7 @@ import hashlib
 import os
 import re
 import sqlite3
+from difflib import unified_diff
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -54,6 +55,8 @@ MIGRATIONS = [
     lambda conn: _migrate_v2_to_v3(conn),
     # Version 3 → 4: add embedding tables (sqlite-vec + config).
     lambda conn: _migrate_v3_to_v4(conn),
+    # Version 4 → 5: add immutable history snapshots for typed memory.
+    lambda conn: _migrate_v4_to_v5(conn),
 ]
 
 
@@ -100,6 +103,54 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection):
         """)
     except Exception:
         pass  # sqlite-vec not available; vector search will be disabled
+    conn.commit()
+
+
+def _migrate_v4_to_v5(conn: sqlite3.Connection):
+    """Add immutable version history for typed memory entries."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS entry_versions (
+            id INTEGER PRIMARY KEY,
+            entry_path TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            content_hash TEXT,
+            status TEXT,
+            "group" TEXT,
+            type TEXT,
+            version_created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            operation_type TEXT NOT NULL,
+            source_metadata TEXT
+        ) STRICT;
+
+        CREATE INDEX IF NOT EXISTS idx_entry_versions_entry_path
+            ON entry_versions(entry_path, version_created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_entry_versions_source_type
+            ON entry_versions(source_type);
+    """)
+
+    # Seed history for pre-existing typed memory so history operations are immediately usable.
+    conn.execute("""
+        INSERT INTO entry_versions(
+            entry_path, source_type, content, content_hash, status, "group", type,
+            version_created_at, operation_type
+        )
+        SELECT
+            d.path,
+            d.source_type,
+            d.content,
+            d.content_hash,
+            d.status,
+            d."group",
+            d.type,
+            COALESCE(d.updated_at, d.created_at, d.indexed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            'create'
+        FROM documents d
+        WHERE d.source_type IN ('note', 'learning', 'task', 'plan')
+          AND NOT EXISTS (
+              SELECT 1 FROM entry_versions ev WHERE ev.entry_path = d.path
+          )
+    """)
     conn.commit()
 
 
@@ -217,8 +268,7 @@ class ProjectMemoryDB:
             if "documents" in tables:
                 # Existing v0 database — migrate in place
                 _migrate_from_v0(self.conn)
-                self._set_schema_version(len(MIGRATIONS))
-                return
+                current = 3
 
         # Run any pending migrations
         for i, migration in enumerate(MIGRATIONS):
@@ -226,6 +276,48 @@ class ProjectMemoryDB:
                 migration(self.conn)
         self._set_schema_version(len(MIGRATIONS))
         self.conn.commit()
+
+    @staticmethod
+    def _is_versioned_source_type(source_type: str) -> bool:
+        return source_type in {"note", "learning", "task", "plan"}
+
+    def _create_version_snapshot(
+        self,
+        path: str,
+        source_type: str,
+        content: str,
+        content_hash_value: str,
+        status: str = None,
+        group: str = None,
+        type: str = None,
+        operation_type: str = "update",
+    ):
+        self.conn.execute(
+            """
+            INSERT INTO entry_versions(
+                entry_path, source_type, content, content_hash, status, "group", type, operation_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (path, source_type, content, content_hash_value, status, group, type, operation_type),
+        )
+
+    @staticmethod
+    def _key_to_path(prefix: str, key: str) -> str:
+        return f"{prefix}:{key}"
+
+    @staticmethod
+    def _path_to_key(path: str) -> str:
+        return path.split(":", 1)[1]
+
+    def _get_current_entry(self, path: str, source_type: str) -> Optional[sqlite3.Row]:
+        return self.conn.execute(
+            """
+            SELECT id, path, content, content_hash, source_type, status, "group", type, created_at, updated_at, indexed_at
+            FROM documents
+            WHERE path = ? AND source_type = ?
+            """,
+            (path, source_type),
+        ).fetchone()
 
     def upsert_document(self, path: str, content: str, source_type: str = "file") -> bool:
         """Insert or update a document. Returns True if content was written, False if skipped (unchanged)."""
@@ -296,10 +388,19 @@ class ProjectMemoryDB:
 
     # --- Generic helpers for typed entries ---
 
-    def _put(self, prefix: str, source_type: str, key: str, content: str,
-             status: str = None, group: str = None, type: str = None) -> bool:
+    def _put(
+        self,
+        prefix: str,
+        source_type: str,
+        key: str,
+        content: str,
+        status: str = None,
+        group: str = None,
+        type: str = None,
+        operation_type: str = None,
+    ) -> bool:
         """Insert or update a typed entry. Returns True if written, False if unchanged."""
-        path = f"{prefix}:{key}"
+        path = self._key_to_path(prefix, key)
         new_hash = content_hash(content)
         cur = self.conn.execute(
             'SELECT id, content_hash, source_type, status, "group", type FROM documents WHERE path = ?',
@@ -318,6 +419,7 @@ class ProjectMemoryDB:
             return False
 
         now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+        effective_operation = operation_type or ("update" if existing else "create")
         if existing:
             self.conn.execute(
                 f'UPDATE documents SET content = ?, content_hash = ?, indexed_at = {now}, updated_at = {now}, source_type = ?, status = ?, "group" = ?, type = ? WHERE id = ?',
@@ -327,6 +429,17 @@ class ProjectMemoryDB:
             self.conn.execute(
                 f'INSERT INTO documents(path, content, content_hash, source_type, status, "group", type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, {now}, {now})',
                 (path, content, new_hash, source_type, status, group, type),
+            )
+        if self._is_versioned_source_type(source_type):
+            self._create_version_snapshot(
+                path=path,
+                source_type=source_type,
+                content=content,
+                content_hash_value=new_hash,
+                status=status,
+                group=group,
+                type=type,
+                operation_type=effective_operation,
             )
         self.conn.commit()
         return True
@@ -389,9 +502,9 @@ class ProjectMemoryDB:
 
     # --- Notes ---
 
-    def remember(self, key: str, content: str, type: str = None) -> bool:
+    def remember(self, key: str, content: str, type: str = None, operation_type: str = None) -> bool:
         """Store a note in memory."""
-        return self._put("note", "note", key, content, type=type)
+        return self._put("note", "note", key, content, type=type, operation_type=operation_type)
 
     def forget(self, key: str) -> bool:
         """Remove a note by key."""
@@ -408,9 +521,9 @@ class ProjectMemoryDB:
 
     # --- Learnings ---
 
-    def learn(self, key: str, content: str, type: str = None) -> bool:
+    def learn(self, key: str, content: str, type: str = None, operation_type: str = None) -> bool:
         """Store a learning."""
-        return self._put("learning", "learning", key, content, type=type)
+        return self._put("learning", "learning", key, content, type=type, operation_type=operation_type)
 
     def forget_learning(self, key: str) -> bool:
         """Remove a learning by key."""
@@ -434,9 +547,19 @@ class ProjectMemoryDB:
         group: str = None,
         type: str = None,
         status: str = "pending",
+        operation_type: str = None,
     ) -> bool:
         """Add or replace a task, defaulting to status 'pending'."""
-        return self._put("task", "task", key, content, status=status, group=group, type=type)
+        return self._put(
+            "task",
+            "task",
+            key,
+            content,
+            status=status,
+            group=group,
+            type=type,
+            operation_type=operation_type,
+        )
 
     def task_update(self, key: str, status: str = None, content: str = None, group: str = None) -> bool:
         """Update a task's status, content, or group. Returns True if changed."""
@@ -470,9 +593,16 @@ class ProjectMemoryDB:
 
     # --- Plans ---
 
-    def plan_create(self, key: str, content: str, type: str = None, status: str = "active") -> bool:
+    def plan_create(
+        self,
+        key: str,
+        content: str,
+        type: str = None,
+        status: str = "active",
+        operation_type: str = None,
+    ) -> bool:
         """Create or update a plan, defaulting to status 'active'."""
-        return self._put("plan", "plan", key, content, status=status, type=type)
+        return self._put("plan", "plan", key, content, status=status, type=type, operation_type=operation_type)
 
     def plan_get(self, key: str) -> Optional[dict]:
         """Get a single plan by key."""
@@ -486,13 +616,17 @@ class ProjectMemoryDB:
 
     def plan_archive(self, key: str) -> bool:
         """Archive a plan. Returns True if changed."""
-        path = f"plan:{key}"
-        cur = self.conn.execute(
-            "UPDATE documents SET status = 'archived', indexed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE path = ? AND source_type = ? AND status = 'active'",
-            (path, "plan"),
+        path = self._key_to_path("plan", key)
+        existing = self._get_current_entry(path, "plan")
+        if not existing or existing["status"] == "archived":
+            return False
+        return self.plan_create(
+            key,
+            existing["content"],
+            type=existing["type"],
+            status="archived",
+            operation_type="archive",
         )
-        self.conn.commit()
-        return cur.rowcount > 0
 
     def plan_list(self, status: str = "active", query: str = None,
                   type: str = None, limit: int = 20) -> List[dict]:
@@ -504,6 +638,108 @@ class ProjectMemoryDB:
         """List plans plus types_in_use. Returns (results, types_in_use)."""
         results = self.plan_list(status=status, query=query, type=type, limit=limit)
         return results, self._types_in_use("plan")
+
+    # --- History ---
+
+    def history_list(self, key: str, source_type: str, limit: int = 20) -> List[dict]:
+        """List immutable history snapshots for a typed memory entry."""
+        path = self._key_to_path(source_type, key)
+        cur = self.conn.execute(
+            """
+            SELECT id, entry_path, source_type, status, "group", type, version_created_at, operation_type
+            FROM entry_versions
+            WHERE entry_path = ? AND source_type = ?
+            ORDER BY version_created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (path, source_type, limit),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def history_get(self, version_id: int) -> Optional[dict]:
+        """Fetch a single history snapshot."""
+        row = self.conn.execute(
+            """
+            SELECT id, entry_path, source_type, content, content_hash, status, "group", type,
+                   version_created_at, operation_type, source_metadata
+            FROM entry_versions
+            WHERE id = ?
+            """,
+            (version_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def _history_snapshot_text(version: dict) -> str:
+        meta = [
+            f"path: {version['entry_path']}",
+            f"source_type: {version['source_type']}",
+            f"operation_type: {version['operation_type']}",
+            f"status: {version.get('status') or ''}",
+            f"group: {version.get('group') or ''}",
+            f"type: {version.get('type') or ''}",
+        ]
+        return "\n".join(meta) + "\n\n" + version["content"]
+
+    def history_diff(self, version_a: int, version_b: int) -> Optional[dict]:
+        """Return a unified diff between two history snapshots."""
+        left = self.history_get(version_a)
+        right = self.history_get(version_b)
+        if not left or not right:
+            return None
+        diff = "".join(
+            unified_diff(
+                self._history_snapshot_text(left).splitlines(keepends=True),
+                self._history_snapshot_text(right).splitlines(keepends=True),
+                fromfile=f"{left['entry_path']}@{left['id']}",
+                tofile=f"{right['entry_path']}@{right['id']}",
+            )
+        )
+        return {
+            "version_a": left,
+            "version_b": right,
+            "diff": diff,
+        }
+
+    def history_restore(self, version_id: int) -> Optional[dict]:
+        """Restore a prior history snapshot as the latest current state."""
+        version = self.history_get(version_id)
+        if not version:
+            return None
+
+        key = self._path_to_key(version["entry_path"])
+        source_type = version["source_type"]
+
+        if source_type == "note":
+            written = self.remember(key, version["content"], type=version.get("type"), operation_type="restore")
+        elif source_type == "learning":
+            written = self.learn(key, version["content"], type=version.get("type"), operation_type="restore")
+        elif source_type == "task":
+            written = self.task_add(
+                key,
+                version["content"],
+                group=version.get("group"),
+                type=version.get("type"),
+                status=version.get("status") or "pending",
+                operation_type="restore",
+            )
+        elif source_type == "plan":
+            written = self.plan_create(
+                key,
+                version["content"],
+                type=version.get("type"),
+                status=version.get("status") or "active",
+                operation_type="restore",
+            )
+        else:
+            return None
+
+        current = self._get_current_entry(version["entry_path"], source_type)
+        result = dict(current) if current else None
+        if result is not None:
+            result["restored"] = written
+            result["restored_from_version_id"] = version_id
+        return result
 
     def close(self):
         self.conn.close()

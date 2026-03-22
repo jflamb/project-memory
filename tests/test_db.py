@@ -727,3 +727,126 @@ def test_plan_get_includes_type(db):
     db.plan_create("p1", "plan content", type="design")
     plan = db.plan_get("p1")
     assert plan["type"] == "design"
+
+
+# --- history ---
+
+
+def test_history_versions_created_for_note_updates(db):
+    db.remember("auth", "version 1", type="convention")
+    db.remember("auth", "version 2", type="reference")
+
+    versions = db.history_list("auth", "note")
+    assert len(versions) == 2
+    assert versions[0]["operation_type"] == "update"
+    assert versions[1]["operation_type"] == "create"
+
+    latest = db.history_get(versions[0]["id"])
+    assert latest["content"] == "version 2"
+    assert latest["type"] == "reference"
+
+
+def test_history_noop_write_does_not_create_duplicate_version(db):
+    db.remember("auth", "same content")
+    assert db.remember("auth", "same content") is False
+    versions = db.history_list("auth", "note")
+    assert len(versions) == 1
+
+
+def test_plan_archive_creates_history_version(db):
+    db.plan_create("release", "plan content", type="checklist")
+    assert db.plan_archive("release") is True
+    versions = db.history_list("release", "plan")
+    assert len(versions) == 2
+    assert versions[0]["operation_type"] == "archive"
+    assert versions[0]["status"] == "archived"
+
+
+def test_history_diff_shows_content_changes(db):
+    db.task_add("t1", "first version", status="pending")
+    db.task_update("t1", status="done", content="second version")
+    versions = db.history_list("t1", "task")
+    diff = db.history_diff(versions[1]["id"], versions[0]["id"])
+    assert diff is not None
+    assert "--- task:t1@" in diff["diff"]
+    assert "+status: done" in diff["diff"]
+    assert "+second version" in diff["diff"]
+
+
+def test_history_restore_recreates_prior_state_and_version(db):
+    db.task_add("t1", "first version", status="pending", group="v1", type="bug")
+    db.task_update("t1", status="done", content="second version", group="v2")
+    older_version = db.history_list("t1", "task")[1]
+
+    restored = db.history_restore(older_version["id"])
+    assert restored is not None
+    assert restored["restored"] is True
+
+    current = db.task_list(status="pending")
+    assert len(current) == 1
+    assert current[0]["content"] == "first version"
+    assert current[0]["group"] == "v1"
+
+    versions = db.history_list("t1", "task")
+    assert versions[0]["operation_type"] == "restore"
+
+
+def test_history_restore_missing_version_returns_none(db):
+    assert db.history_restore(9999) is None
+
+
+def test_migrate_v4_to_v5_backfills_history(tmp_path):
+    db_dir = tmp_path / ".project-memory"
+    db_dir.mkdir()
+    db_path = db_dir / "project_memory.db"
+
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE documents (
+            id INTEGER PRIMARY KEY,
+            path TEXT UNIQUE NOT NULL,
+            content TEXT NOT NULL,
+            source_type TEXT DEFAULT 'file',
+            indexed_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            content_hash TEXT,
+            status TEXT,
+            "group" TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            type TEXT
+        );
+        CREATE VIRTUAL TABLE documents_fts USING fts5(path, content, content='documents', content_rowid='id');
+        CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts(rowid, path, content) VALUES (new.id, new.path, new.content);
+        END;
+        CREATE TRIGGER documents_ad AFTER DELETE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, path, content) VALUES ('delete', old.id, old.path, old.content);
+        END;
+        CREATE TRIGGER documents_au AFTER UPDATE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, path, content) VALUES ('delete', old.id, old.path, old.content);
+            INSERT INTO documents_fts(rowid, path, content) VALUES (new.id, new.path, new.content);
+        END;
+        CREATE TABLE embedding_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            model TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            base_url TEXT NOT NULL
+        );
+    """)
+    conn.execute(
+        """
+        INSERT INTO documents(path, content, source_type, content_hash, status, created_at, updated_at, type)
+        VALUES ('note:seeded', 'seeded content', 'note', ?, NULL, '2026-03-21T10:00:00.000Z', '2026-03-21T10:00:00.000Z', 'reference')
+        """,
+        (content_hash("seeded content"),),
+    )
+    conn.execute("PRAGMA user_version = 4")
+    conn.commit()
+    conn.close()
+
+    with ProjectMemoryDB(root=tmp_path) as db:
+        versions = db.history_list("seeded", "note")
+        assert len(versions) == 1
+        version = db.history_get(versions[0]["id"])
+        assert version["content"] == "seeded content"
+        assert version["operation_type"] == "create"

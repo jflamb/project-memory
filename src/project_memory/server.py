@@ -88,6 +88,41 @@ def create_mcp_server(root: str | None = None) -> FastMCP:
         with ProjectMemoryDB(root=repo_root) as db:
             return db.list_documents()
 
+    @mcp.tool()
+    def plan_get(key: str) -> dict:
+        """Get a single plan by key. Returns the full plan content."""
+        with ProjectMemoryDB(root=repo_root) as db:
+            plan = db.plan_get(key)
+        return plan or {"error": f"No plan found with key '{key}'"}
+
+    @mcp.tool()
+    def history_list(key: str, source_type: str, limit: int = 20) -> dict:
+        """List immutable history snapshots for a typed memory entry."""
+        with ProjectMemoryDB(root=repo_root) as db:
+            results = db.history_list(key=key, source_type=source_type, limit=limit)
+        return {"results": results}
+
+    @mcp.tool()
+    def history_get(version_id: int) -> dict:
+        """Get a single history snapshot by version id."""
+        with ProjectMemoryDB(root=repo_root) as db:
+            version = db.history_get(version_id)
+        return version or {"error": f"No history version found with id '{version_id}'"}
+
+    @mcp.tool()
+    def history_diff(version_a: int, version_b: int) -> dict:
+        """Return a unified diff between two history snapshots."""
+        with ProjectMemoryDB(root=repo_root) as db:
+            diff = db.history_diff(version_a, version_b)
+        return diff or {"error": "One or both history versions were not found"}
+
+    @mcp.tool()
+    def history_restore(version_id: int) -> dict:
+        """Restore a history snapshot as the latest current state."""
+        with ProjectMemoryDB(root=repo_root) as db:
+            restored = db.history_restore(version_id)
+        return restored or {"error": f"No history version found with id '{version_id}'"}
+
     return mcp
 
 
@@ -275,6 +310,34 @@ def create_stdio_server() -> FastMCP:
         with _ensure_db() as db:
             archived = db.plan_archive(key)
         return {"key": key, "archived": archived}
+
+    @mcp.tool()
+    def history_list(key: str, source_type: str, limit: int = 20) -> dict:
+        """List immutable history snapshots for a typed memory entry."""
+        with _ensure_db() as db:
+            results = db.history_list(key=key, source_type=source_type, limit=limit)
+        return {"results": results}
+
+    @mcp.tool()
+    def history_get(version_id: int) -> dict:
+        """Get a single history snapshot by version id."""
+        with _ensure_db() as db:
+            version = db.history_get(version_id)
+        return version or {"error": f"No history version found with id '{version_id}'"}
+
+    @mcp.tool()
+    def history_diff(version_a: int, version_b: int) -> dict:
+        """Return a unified diff between two history snapshots."""
+        with _ensure_db() as db:
+            diff = db.history_diff(version_a, version_b)
+        return diff or {"error": "One or both history versions were not found"}
+
+    @mcp.tool()
+    def history_restore(version_id: int) -> dict:
+        """Restore a history snapshot as the latest current state."""
+        with _ensure_db() as db:
+            restored = db.history_restore(version_id)
+        return restored or {"error": f"No history version found with id '{version_id}'"}
 
     # --- Export / Import ---
 

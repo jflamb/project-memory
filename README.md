@@ -4,6 +4,7 @@ This project is a repo-scoped memory engine, including:
 - CLI (`project-memory`) via Typer
 - SQLite memory database under `.project-memory/`
 - File ingestion plus typed memory for notes, learnings, tasks, and plans
+- Immutable history snapshots for notes, learnings, tasks, and plans
 - Keyword search across indexed files and typed memory
 - MCP HTTP server over streamable HTTP
 - GitHub Actions CI/release/publish workflows
@@ -25,6 +26,7 @@ project-memory serve-mcp
 - `project-memory index` indexes repository text files only. Reindexing cleans up stale file documents, but it does not delete notes, learnings, tasks, or plans.
 - `project-memory search` is keyword-only today. Search results can include both indexed files and typed memory.
 - `project-memory export` / `project-memory import` round-trip task and plan status, including archived plans.
+- Typed memory writes create immutable history snapshots, and entries can be diffed or restored via `project-memory history ...`.
 - Embedding configuration commands exist, but embedding-backed indexing and query-time hybrid search are not implemented yet.
 
 ## Commands
@@ -37,6 +39,7 @@ project-memory serve-mcp
 - `project-memory task ...` - manage tracked tasks
 - `project-memory plan ...` - manage implementation plans and protocols
 - `project-memory export` / `project-memory import` - round-trip memory through `MEMORY.md`
+- `project-memory history ...` - list, inspect, diff, and restore typed memory revisions
 - `project-memory serve-mcp` - run the MCP server at `http://127.0.0.1:8000/mcp/`
 
 ## Project structure

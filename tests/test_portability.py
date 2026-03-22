@@ -290,6 +290,8 @@ Fix the login bug.
     tasks = db.task_list(status="done")
     assert len(tasks) == 1
     assert tasks[0]["status"] == "done"
+    versions = db.history_list("fix-bug", "task")
+    assert versions[0]["operation_type"] == "import"
 
 
 def test_import_plans(db, tmp_path):
@@ -324,6 +326,8 @@ Add embedding-based search alongside FTS5.
     plans = db.plan_list(status="archived")
     assert len(plans) == 1
     assert plans[0]["status"] == "archived"
+    versions = db.history_list("vector-search", "plan")
+    assert versions[0]["operation_type"] == "import"
 
 
 # --- round-trip ---
@@ -385,3 +389,5 @@ def test_export_import_round_trip_preserves_archived_plan_and_done_task(tmp_path
         assert len(tasks) == 1
         plans = db2.plan_list(status="archived")
         assert len(plans) == 1
+        assert db2.history_list("t1", "task")[0]["operation_type"] == "import"
+        assert db2.history_list("branching", "plan")[0]["operation_type"] == "import"

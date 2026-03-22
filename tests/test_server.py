@@ -37,6 +37,39 @@ async def test_mcp_server_exposes_tools_and_can_search(tmp_path):
                     assert search_result.structuredContent["result"][0]["path"] == "memory.txt"
 
 
+@pytest.mark.anyio
+async def test_mcp_server_plan_get_and_history_tools(tmp_path):
+    from project_memory.db import ProjectMemoryDB
+
+    with ProjectMemoryDB(root=tmp_path) as db:
+        db.plan_create("roadmap", "version one", type="design")
+        db.plan_create("roadmap", "version two", type="design")
+
+    app = create_app(str(tmp_path))
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as http_client:
+            async with streamable_http_client("http://127.0.0.1:8000/mcp/", http_client=http_client) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as client:
+                    await client.initialize()
+
+                    plan_result = await client.call_tool("plan_get", {"key": "roadmap"})
+                    plan_data = json.loads(plan_result.content[0].text)
+                    assert plan_data["content"] == "version two"
+
+                    history_result = await client.call_tool("history_list", {"key": "roadmap", "source_type": "plan"})
+                    versions = json.loads(history_result.content[0].text)["results"]
+                    assert len(versions) == 2
+
+                    diff_result = await client.call_tool(
+                        "history_diff",
+                        {"version_a": versions[1]["id"], "version_b": versions[0]["id"]},
+                    )
+                    diff_data = json.loads(diff_result.content[0].text)
+                    assert "version two" in diff_data["diff"]
+
+
 # --- MCP stdio server: type support ---
 
 
