@@ -636,7 +636,7 @@ def mcp_config_command(
         config = {
             "project-memory": {
                 "command": "uvx",
-                "args": ["project-memory", "serve-stdio", "--path", "."],
+                "args": ["project-memory", "serve-stdio", "--path", "${workspaceFolder}"],
             }
         }
     else:

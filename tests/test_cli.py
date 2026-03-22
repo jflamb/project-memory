@@ -592,6 +592,7 @@ def test_mcp_config_claude_code(runner):
     data = json.loads(result.output)
     assert "project-memory" in data
     assert "command" in data["project-memory"]
+    assert data["project-memory"]["args"] == ["project-memory", "serve-stdio", "--path", "."]
 
 
 def test_mcp_config_claude_desktop(runner):
@@ -600,6 +601,7 @@ def test_mcp_config_claude_desktop(runner):
     data = json.loads(result.output)
     assert "project-memory" in data
     assert "command" in data["project-memory"]
+    assert data["project-memory"]["args"] == ["project-memory", "serve-stdio", "--path", "."]
 
 
 def test_mcp_config_cursor(runner):
@@ -607,6 +609,7 @@ def test_mcp_config_cursor(runner):
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert "project-memory" in data
+    assert data["project-memory"]["args"] == ["project-memory", "serve-stdio", "--path", "${workspaceFolder}"]
 
 
 def test_mcp_config_default_format(runner):
