@@ -174,6 +174,7 @@ def stats(path: RepoPath = "."):
 
     with ProjectMemoryDB(root=root) as db:
         count = db.document_count()
+        version_count = db.history_version_count()
     size_bytes = db_path.stat().st_size
     if size_bytes < 1024:
         size_str = f"{size_bytes} B"
@@ -182,6 +183,7 @@ def stats(path: RepoPath = "."):
     else:
         size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
     typer.echo(f"Documents: {count}")
+    typer.echo(f"History versions: {version_count}")
     typer.echo(f"Database size: {size_str}")
 
 

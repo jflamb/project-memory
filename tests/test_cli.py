@@ -158,9 +158,11 @@ def test_stats_shows_count(initialized_repo, runner):
     (initialized_repo / "a.txt").write_text("one")
     (initialized_repo / "b.txt").write_text("two")
     runner.invoke(app, ["index", "--path", str(initialized_repo)])
+    runner.invoke(app, ["remember", "deploy", "run migrations", "--path", str(initialized_repo)])
     result = runner.invoke(app, ["stats", "--path", str(initialized_repo)])
     assert result.exit_code == 0
-    assert "Documents: 2" in result.output
+    assert "Documents: 3" in result.output
+    assert "History versions: 1" in result.output
     assert "Database size:" in result.output
 
 

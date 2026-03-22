@@ -152,6 +152,23 @@ def test_stdio_plan_list_filter_by_type(tmp_path):
         assert results[0]["path"] == "plan:p2"
 
 
+@pytest.mark.anyio
+async def test_stdio_stats_reports_history_versions(tmp_path, monkeypatch):
+    from project_memory.db import ProjectMemoryDB
+
+    monkeypatch.chdir(tmp_path)
+    with ProjectMemoryDB(root=tmp_path) as db:
+        db.remember("auth", "version 1")
+        db.remember("auth", "version 2")
+
+    mcp = create_stdio_server()
+    result = await mcp.call_tool("stats", {})
+    data = json.loads(result[0].text)
+    assert data["documents"] == 1
+    assert data["versions"] == 2
+    assert data["size_bytes"] > 0
+
+
 # --- MCP stdio server: export/import ---
 
 

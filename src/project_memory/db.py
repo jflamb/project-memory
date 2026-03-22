@@ -12,40 +12,7 @@ DEFAULT_DB = "project_memory.db"
 # Each migration takes a connection and applies one schema version bump.
 MIGRATIONS = [
     # Version 0 → 1: initial schema with FTS5 triggers, new columns.
-    lambda conn: conn.executescript("""
-        CREATE TABLE IF NOT EXISTS documents (
-            id INTEGER PRIMARY KEY,
-            path TEXT UNIQUE NOT NULL,
-            content TEXT NOT NULL,
-            source_type TEXT DEFAULT 'file',
-            indexed_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            content_hash TEXT
-        ) STRICT;
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-            path, content, content='documents', content_rowid='id'
-        );
-
-        -- Keep FTS in sync on INSERT
-        CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
-            INSERT INTO documents_fts(rowid, path, content)
-            VALUES (new.id, new.path, new.content);
-        END;
-
-        -- Keep FTS in sync on DELETE
-        CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
-            INSERT INTO documents_fts(documents_fts, rowid, path, content)
-            VALUES ('delete', old.id, old.path, old.content);
-        END;
-
-        -- Keep FTS in sync on UPDATE
-        CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
-            INSERT INTO documents_fts(documents_fts, rowid, path, content)
-            VALUES ('delete', old.id, old.path, old.content);
-            INSERT INTO documents_fts(rowid, path, content)
-            VALUES (new.id, new.path, new.content);
-        END;
-    """),
+    lambda conn: _migrate_v0_to_v1(conn),
     # Version 1 → 2: add status and group columns for tasks/plans.
     lambda conn: conn.executescript("""
         ALTER TABLE documents ADD COLUMN status TEXT;
@@ -79,8 +46,48 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection):
             updated_at = COALESCE(indexed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         WHERE created_at IS NULL
     """)
-    conn.commit()
 
+
+def _migrate_v0_to_v1(conn: sqlite3.Connection):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY,
+            path TEXT UNIQUE NOT NULL,
+            content TEXT NOT NULL,
+            source_type TEXT DEFAULT 'file',
+            indexed_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            content_hash TEXT
+        ) STRICT
+    """)
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+            path, content, content='documents', content_rowid='id'
+        )
+    """)
+    _create_documents_triggers(conn)
+
+
+def _create_documents_triggers(conn: sqlite3.Connection):
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts(rowid, path, content)
+            VALUES (new.id, new.path, new.content);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, path, content)
+            VALUES ('delete', old.id, old.path, old.content);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, path, content)
+            VALUES ('delete', old.id, old.path, old.content);
+            INSERT INTO documents_fts(rowid, path, content)
+            VALUES (new.id, new.path, new.content);
+        END
+    """)
 
 def _migrate_v3_to_v4(conn: sqlite3.Connection):
     """Add embedding tables: vec_documents (sqlite-vec) and embedding_config."""
@@ -103,12 +110,10 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection):
         """)
     except Exception:
         pass  # sqlite-vec not available; vector search will be disabled
-    conn.commit()
-
 
 def _migrate_v4_to_v5(conn: sqlite3.Connection):
     """Add immutable version history for typed memory entries."""
-    conn.executescript("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS entry_versions (
             id INTEGER PRIMARY KEY,
             entry_path TEXT NOT NULL,
@@ -121,12 +126,15 @@ def _migrate_v4_to_v5(conn: sqlite3.Connection):
             version_created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
             operation_type TEXT NOT NULL,
             source_metadata TEXT
-        ) STRICT;
-
+        ) STRICT
+    """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_entry_versions_entry_path
-            ON entry_versions(entry_path, version_created_at DESC, id DESC);
+        ON entry_versions(entry_path, version_created_at DESC, id DESC)
+    """)
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_entry_versions_source_type
-            ON entry_versions(source_type);
+        ON entry_versions(source_type)
     """)
 
     # Seed history for pre-existing typed memory so history operations are immediately usable.
@@ -151,8 +159,6 @@ def _migrate_v4_to_v5(conn: sqlite3.Connection):
               SELECT 1 FROM entry_versions ev WHERE ev.entry_path = d.path
           )
     """)
-    conn.commit()
-
 
 def _migrate_from_v0(conn: sqlite3.Connection):
     """Migrate a pre-migration database (v0 schema) to v1.
@@ -178,38 +184,19 @@ def _migrate_from_v0(conn: sqlite3.Connection):
             pass  # column already exists
 
     # Drop old FTS table and recreate with triggers
-    conn.executescript("""
-        DROP TABLE IF EXISTS documents_fts;
-
+    conn.execute("DROP TABLE IF EXISTS documents_fts")
+    conn.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
             path, content, content='documents', content_rowid='id'
-        );
-
-        CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
-            INSERT INTO documents_fts(rowid, path, content)
-            VALUES (new.id, new.path, new.content);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
-            INSERT INTO documents_fts(documents_fts, rowid, path, content)
-            VALUES ('delete', old.id, old.path, old.content);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
-            INSERT INTO documents_fts(documents_fts, rowid, path, content)
-            VALUES ('delete', old.id, old.path, old.content);
-            INSERT INTO documents_fts(rowid, path, content)
-            VALUES (new.id, new.path, new.content);
-        END;
+        )
     """)
+    _create_documents_triggers(conn)
 
     # Rebuild FTS index from existing data
     conn.execute("""
         INSERT INTO documents_fts(rowid, path, content)
         SELECT id, path, content FROM documents
     """)
-    conn.commit()
-
 
 def content_hash(content: str) -> str:
     """Return a hex SHA-256 digest of the content string."""
@@ -224,10 +211,15 @@ class ProjectMemoryDB:
         self.db_path = self.db_dir / DEFAULT_DB
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA foreign_keys=ON")
-        self._load_vec_extension()
-        self._run_migrations()
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA foreign_keys=ON")
+            self.conn.execute("PRAGMA busy_timeout = 5000")
+            self._load_vec_extension()
+            self._run_migrations()
+        except Exception:
+            self.conn.close()
+            raise
 
     def _load_vec_extension(self):
         """Load the sqlite-vec extension for vector search."""
@@ -252,7 +244,16 @@ class ProjectMemoryDB:
 
     def _set_schema_version(self, version: int):
         self.conn.execute(f"PRAGMA user_version = {version}")
-        self.conn.commit()
+
+    def _run_migration_step(self, version: int, migration) -> None:
+        try:
+            self.conn.execute("BEGIN")
+            migration(self.conn)
+            self._set_schema_version(version)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def _run_migrations(self):
         current = self._get_schema_version()
@@ -267,15 +268,13 @@ class ProjectMemoryDB:
             }
             if "documents" in tables:
                 # Existing v0 database — migrate in place
-                _migrate_from_v0(self.conn)
+                self._run_migration_step(3, _migrate_from_v0)
                 current = 3
 
         # Run any pending migrations
         for i, migration in enumerate(MIGRATIONS):
             if i >= current:
-                migration(self.conn)
-        self._set_schema_version(len(MIGRATIONS))
-        self.conn.commit()
+                self._run_migration_step(i + 1, migration)
 
     @staticmethod
     def _is_versioned_source_type(source_type: str) -> bool:
@@ -385,6 +384,9 @@ class ProjectMemoryDB:
 
     def document_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+
+    def history_version_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM entry_versions").fetchone()[0]
 
     # --- Generic helpers for typed entries ---
 

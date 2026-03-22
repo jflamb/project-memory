@@ -2,6 +2,7 @@ import sqlite3
 
 import pytest
 
+import project_memory.db as db_module
 from project_memory.db import ProjectMemoryDB, content_hash, normalize_fts_query
 
 
@@ -129,6 +130,11 @@ def test_document_count(db):
 def test_wal_mode_enabled(db):
     mode = db.conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode == "wal"
+
+
+def test_busy_timeout_configured(db):
+    timeout = db.conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert timeout == 5000
 
 
 # --- schema migration from v0 ---
@@ -850,3 +856,100 @@ def test_migrate_v4_to_v5_backfills_history(tmp_path):
         version = db.history_get(versions[0]["id"])
         assert version["content"] == "seeded content"
         assert version["operation_type"] == "create"
+        assert version["type"] == "reference"
+
+
+def test_history_version_count_tracks_entry_versions(db):
+    assert db.history_version_count() == 0
+    db.remember("auth", "v1")
+    db.remember("auth", "v2")
+    assert db.history_version_count() == 2
+
+
+def test_init_closes_connection_when_migrations_fail(tmp_path, monkeypatch):
+    opened_connections = []
+    real_connect = sqlite3.connect
+
+    def tracking_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        opened_connections.append(conn)
+        return conn
+
+    monkeypatch.setattr(db_module.sqlite3, "connect", tracking_connect)
+    monkeypatch.setattr(ProjectMemoryDB, "_load_vec_extension", lambda self: setattr(self, "_has_vec", False))
+    monkeypatch.setattr(ProjectMemoryDB, "_run_migrations", lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        ProjectMemoryDB(root=tmp_path)
+
+    assert len(opened_connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError):
+        opened_connections[0].execute("SELECT 1")
+
+
+def test_failed_migration_rolls_back_and_preserves_schema_version(tmp_path, monkeypatch):
+    db_dir = tmp_path / ".project-memory"
+    db_dir.mkdir()
+    db_path = db_dir / "project_memory.db"
+
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE documents (
+            id INTEGER PRIMARY KEY,
+            path TEXT UNIQUE NOT NULL,
+            content TEXT NOT NULL,
+            source_type TEXT DEFAULT 'file',
+            indexed_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            content_hash TEXT,
+            status TEXT,
+            "group" TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            type TEXT
+        );
+        CREATE VIRTUAL TABLE documents_fts USING fts5(path, content, content='documents', content_rowid='id');
+        CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts(rowid, path, content) VALUES (new.id, new.path, new.content);
+        END;
+        CREATE TRIGGER documents_ad AFTER DELETE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, path, content) VALUES ('delete', old.id, old.path, old.content);
+        END;
+        CREATE TRIGGER documents_au AFTER UPDATE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, path, content) VALUES ('delete', old.id, old.path, old.content);
+            INSERT INTO documents_fts(rowid, path, content) VALUES (new.id, new.path, new.content);
+        END;
+        CREATE TABLE embedding_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            model TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            base_url TEXT NOT NULL
+        );
+    """)
+    conn.execute("PRAGMA user_version = 4")
+    conn.commit()
+    conn.close()
+
+    original = db_module.MIGRATIONS[4]
+
+    def failing_migration(conn):
+        conn.execute("CREATE TABLE migration_marker(id INTEGER PRIMARY KEY)")
+        raise RuntimeError("migration failed")
+
+    try:
+        db_module.MIGRATIONS[4] = failing_migration
+
+        with pytest.raises(RuntimeError, match="migration failed"):
+            ProjectMemoryDB(root=tmp_path)
+
+        check_conn = sqlite3.connect(db_path)
+        try:
+            version = check_conn.execute("PRAGMA user_version").fetchone()[0]
+            assert version == 4
+            marker = check_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'migration_marker'"
+            ).fetchone()
+            assert marker is None
+        finally:
+            check_conn.close()
+    finally:
+        db_module.MIGRATIONS[4] = original

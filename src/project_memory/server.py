@@ -169,11 +169,12 @@ def create_stdio_server() -> FastMCP:
         db_path = root / ".project-memory" / "project_memory.db"
         with _ensure_db() as db:
             count = db.document_count()
+            version_count = db.history_version_count()
         if db_path.exists():
             size_bytes = db_path.stat().st_size
         else:
             size_bytes = 0
-        return {"documents": count, "size_bytes": size_bytes}
+        return {"documents": count, "versions": version_count, "size_bytes": size_bytes}
 
     @mcp.tool()
     def remember(key: str, content: str, type: str = "") -> dict:
