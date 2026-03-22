@@ -1,6 +1,7 @@
 """Embedding configuration, storage, and hybrid search."""
 
 import json
+import logging
 import os
 import stat
 import struct
@@ -8,10 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from .db import ProjectMemoryDB, normalize_fts_query
+from .db import ProjectMemoryDB
 
 _DEFAULT_CONFIG_DIR = Path.home() / ".config" / "project-memory"
 _CONFIG_FILENAME = "config.json"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -131,6 +133,7 @@ def hybrid_search(
         vec_results = search_by_embedding(db, query_vector, limit=limit * 2)
     except Exception:
         # Vector table might not exist or be empty
+        logger.warning("Hybrid search fell back to keyword mode because vector search failed", exc_info=True)
         for r in fts_results:
             r["search_mode"] = "keyword"
         return fts_results[:limit]

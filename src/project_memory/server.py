@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import os
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from .search import search as search_repository
 VALID_HISTORY_SOURCE_TYPES = {"note", "learning", "task", "plan"}
 VALID_TASK_STATUSES = {"pending", "in_progress", "done"}
 VALID_PLAN_STATUSES = {"active", "archived"}
+logger = logging.getLogger(__name__)
 
 
 def _resolve_root(root: str | None) -> Path:
@@ -109,6 +111,7 @@ class _BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path.startswith("/mcp"):
             if request.headers.get("authorization") != self._expected:
+                logger.warning("Rejected unauthorized HTTP MCP request for %s", request.url.path)
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
         return await call_next(request)
 

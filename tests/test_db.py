@@ -496,6 +496,10 @@ def test_normalize_preserves_underscores():
     assert normalize_fts_query("my_func") == '"my_func"'
 
 
+def test_normalize_preserves_quoted_phrases():
+    assert normalize_fts_query('"connection pool" timeout') == '"connection pool" AND "timeout"'
+
+
 # --- schema evolution: migration v2 to v3 ---
 
 

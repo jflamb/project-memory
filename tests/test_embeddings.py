@@ -149,6 +149,19 @@ def test_hybrid_search_returns_search_mode(db):
     assert all(r["search_mode"] == "hybrid" for r in results)
 
 
+def test_hybrid_search_logs_when_vector_search_fails(db, monkeypatch, caplog):
+    db.upsert_document("a.txt", "test content")
+    db._has_vec = True
+
+    monkeypatch.setattr("project_memory.embeddings.search_by_embedding", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("vec failed")))
+
+    with caplog.at_level("WARNING"):
+        results = hybrid_search(db, query="test", query_vector=_make_vector(val=0.5), limit=5)
+
+    assert results[0]["search_mode"] == "keyword"
+    assert "Hybrid search fell back to keyword mode because vector search failed" in caplog.text
+
+
 # --- embedding API client ---
 
 

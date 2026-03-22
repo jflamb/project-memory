@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 import re
 import sqlite3
@@ -8,6 +9,7 @@ from typing import Iterable, List, Optional
 
 DEFAULT_DIR = ".project-memory"
 DEFAULT_DB = "project_memory.db"
+logger = logging.getLogger(__name__)
 
 # Each migration takes a connection and applies one schema version bump.
 MIGRATIONS = [
@@ -231,6 +233,7 @@ class ProjectMemoryDB:
             self._has_vec = True
         except (ImportError, Exception):
             self._has_vec = False
+            logger.warning("sqlite-vec extension unavailable; vector search is disabled")
 
     def __enter__(self):
         return self
@@ -748,7 +751,14 @@ class ProjectMemoryDB:
 
 
 def normalize_fts_query(query: str) -> str:
-    terms = re.findall(r"[A-Za-z0-9_]+", query)
-    if not terms:
+    phrases = [
+        phrase.strip()
+        for phrase in re.findall(r'"([^"]+)"', query)
+        if re.search(r"[A-Za-z0-9_]", phrase)
+    ]
+    remainder = re.sub(r'"[^"]+"', " ", query)
+    terms = re.findall(r"[A-Za-z0-9_]+", remainder)
+    parts = [f'"{phrase}"' for phrase in phrases] + [f'"{term}"' for term in terms]
+    if not parts:
         return ""
-    return " AND ".join(f'"{term}"' for term in terms)
+    return " AND ".join(parts)

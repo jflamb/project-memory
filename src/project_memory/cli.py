@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import secrets
 from enum import Enum
@@ -13,6 +14,8 @@ from .portability import export_memory, import_memory
 from .protocols import generate_default_protocols
 from .search import search as search_docs
 from .server import create_app, create_stdio_server
+
+logging.basicConfig(level=logging.WARNING)
 
 app = typer.Typer(help="Project Memory — repo-scoped memory engine for AI agents")
 task_app = typer.Typer(help="Manage tasks")
